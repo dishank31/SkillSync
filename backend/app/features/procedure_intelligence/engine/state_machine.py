@@ -24,6 +24,7 @@ class SessionState:
     step_invalid_since_ms: int | None = None
     mcp_out_of_range_since_ms: int | None = None
     step_entered_at_ms: int | None = None
+    transition_grace_until_ms: int | None = None
     completed: bool = False
 
 
@@ -56,7 +57,7 @@ def get_session_state(
     key = session_key or procedure_id
     state = SESSIONS.get(key)
     if state is None or state.current_step_id not in steps_by_id:
-        state = SessionState(current_step_id=schema.steps[0].id)
+        state = SessionState(current_step_id=schema.steps[0].id, step_entered_at_ms=_now_ms())
         SESSIONS[key] = state
     return state
 
@@ -69,7 +70,7 @@ def reset_session(
     """Reset a procedure session back to the first step."""
     schema = load_procedure_schema(procedure_id)
     key = session_key or procedure_id
-    state = SessionState(current_step_id=schema.steps[0].id)
+    state = SessionState(current_step_id=schema.steps[0].id, step_entered_at_ms=_now_ms())
     SESSIONS[key] = state
     return state
 
@@ -104,27 +105,44 @@ def update_step(
         else (_now_ms() if now_ms is None else now_ms)
     )
 
-    # Global safety constraint: if MCP is continuously out of range for 3s
-    if mcp_in_range is False:
-        if state.mcp_out_of_range_since_ms is None:
-            state.mcp_out_of_range_since_ms = int(t_ms)
-        if int(t_ms - state.mcp_out_of_range_since_ms) >= 3000:
-            state.current_step_id = schema.steps[0].id
-            state.step_valid_since_ms = None
-            state.step_invalid_since_ms = None
-            state.mcp_out_of_range_since_ms = None
-            state.completed = False
-            return StepUpdate(
-                step_started=step_started,
-                step_now=state.current_step_id,
-                advanced=False,
-                step_valid_since_ms=state.step_valid_since_ms,
-                dwell_remaining_ms=0,
-                completed=state.completed,
-                reset=True,
-            )
-    elif mcp_in_range is True:
+    # Transition adjustment grace period: allow the learner time to reposition their hand
+    in_transition_grace = (
+        state.transition_grace_until_ms is not None
+        and int(t_ms) < state.transition_grace_until_ms
+    )
+
+    if in_transition_grace:
+        # User is actively transitioning; do not accumulate MCP out-of-range safety violation
         state.mcp_out_of_range_since_ms = None
+        # If user achieves valid pose during grace period, end grace immediately so dwell starts
+        if valid_constraints and is_observed:
+            state.transition_grace_until_ms = None
+    else:
+        if state.transition_grace_until_ms is not None:
+            state.transition_grace_until_ms = None
+
+        # Global safety constraint: if MCP is continuously out of range for 3s
+        if mcp_in_range is False:
+            if state.mcp_out_of_range_since_ms is None:
+                state.mcp_out_of_range_since_ms = int(t_ms)
+            if int(t_ms - state.mcp_out_of_range_since_ms) >= 3000:
+                state.current_step_id = schema.steps[0].id
+                state.step_valid_since_ms = None
+                state.step_invalid_since_ms = None
+                state.mcp_out_of_range_since_ms = None
+                state.transition_grace_until_ms = None
+                state.completed = False
+                return StepUpdate(
+                    step_started=step_started,
+                    step_now=state.current_step_id,
+                    advanced=False,
+                    step_valid_since_ms=state.step_valid_since_ms,
+                    dwell_remaining_ms=0,
+                    completed=state.completed,
+                    reset=True,
+                )
+        elif mcp_in_range is True:
+            state.mcp_out_of_range_since_ms = None
 
     # Tracking lost or estimated frames must NEVER advance the hold timer
     if not is_observed or not valid_constraints:
@@ -158,14 +176,19 @@ def update_step(
     dwell_ms = int(step_schema.dwell_time_ms)
     if dwell_ms <= 0:
         nxt = step_schema.next_step
+        advanced = nxt != step_started
         state.current_step_id = nxt
         state.step_valid_since_ms = None
         state.step_invalid_since_ms = None
+        if advanced:
+            state.mcp_out_of_range_since_ms = None
+            state.step_entered_at_ms = int(t_ms)
+            state.transition_grace_until_ms = int(t_ms) + 6000
         state.completed = nxt == "completed"
         return StepUpdate(
             step_started=step_started,
             step_now=nxt,
-            advanced=nxt != step_started,
+            advanced=advanced,
             step_valid_since_ms=state.step_valid_since_ms,
             dwell_remaining_ms=0,
             completed=state.completed,
@@ -187,14 +210,19 @@ def update_step(
         )
 
     nxt = step_schema.next_step
+    advanced = nxt != step_started
     state.current_step_id = nxt
     state.step_valid_since_ms = None
     state.step_invalid_since_ms = None
+    if advanced:
+        state.mcp_out_of_range_since_ms = None
+        state.step_entered_at_ms = int(t_ms)
+        state.transition_grace_until_ms = int(t_ms) + 6000
     state.completed = nxt == "completed"
     return StepUpdate(
         step_started=step_started,
         step_now=nxt,
-        advanced=nxt != step_started,
+        advanced=advanced,
         step_valid_since_ms=state.step_valid_since_ms,
         dwell_remaining_ms=0,
         completed=state.completed,

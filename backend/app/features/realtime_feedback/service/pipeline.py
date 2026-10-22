@@ -117,7 +117,7 @@ def process_frame(
 
         # Handle occlusion estimate / visualization
         estimate = estimator.predict(timestamp_ms=request.timestamp_ms)
-        if estimate.expired or not estimate.landmarks or elapsed_since_loss > cfg.tracking.tracking_loss_timeout_ms:
+        if estimate.expired or elapsed_since_loss > cfg.tracking.tracking_loss_timeout_ms:
             # Full tracking loss timeout: reset procedure hold and clear pose
             reset_session(procedure_id=request.procedure_id, session_key=session_id)
             _LAST_OBSERVED_BY_SESSION.pop(session_id, None)
@@ -225,8 +225,8 @@ def process_frame(
     mcp_val = angles.get("index_mcp_angle") or angles.get("mcp_joint")
     mcp_in_range: bool | None = None
     if mcp_val is not None:
-        # Expected ergonomic working posture for index MCP
-        mcp_in_range = 100.0 <= float(mcp_val) <= 175.0
+        # Expected ergonomic working posture for index MCP (aligned with schema min 65-70)
+        mcp_in_range = 65.0 <= float(mcp_val) <= 175.0
 
     # 7. State Machine update (timer ONLY advances if is_observed is True and constraints valid)
     step_update = update_step(

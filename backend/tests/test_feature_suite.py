@@ -178,6 +178,44 @@ def test_state_machine_advances_after_two_second_hold() -> None:
     assert second.advanced is True
 
 
+def test_state_machine_grants_transition_grace_period_on_step_advance() -> None:
+    session_key = "test_grace"
+
+    # Hold Step 1 for 2100ms to advance
+    state_machine.update_step(
+        procedure_id="soldering_practice",
+        session_key=session_key,
+        valid_constraints=True,
+        is_observed=True,
+        mcp_in_range=False,
+        timestamp_ms=1000,
+    )
+    advance = state_machine.update_step(
+        procedure_id="soldering_practice",
+        session_key=session_key,
+        valid_constraints=True,
+        is_observed=True,
+        mcp_in_range=False,
+        timestamp_ms=3100,
+    )
+    assert advance.advanced is True
+    assert advance.step_now == "positioning_phase"
+
+    # User enters Step 2 and adjusts hand (out of range posture for 3.5 seconds)
+    during_adjustment = state_machine.update_step(
+        procedure_id="soldering_practice",
+        session_key=session_key,
+        valid_constraints=False,
+        is_observed=True,
+        mcp_in_range=False,
+        timestamp_ms=6600,
+    )
+
+    # Must NOT reset back to Step 1 during transition grace period
+    assert during_adjustment.reset is False
+    assert during_adjustment.step_now == "positioning_phase"
+
+
 def test_state_machine_resets_when_mcp_out_of_range_for_three_seconds() -> None:
     session_key = "test_reset"
     state_machine.SESSIONS[session_key] = state_machine.SessionState(
