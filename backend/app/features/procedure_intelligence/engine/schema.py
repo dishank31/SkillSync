@@ -1,3 +1,11 @@
+"""
+Procedure schema definitions and constraint limits.
+
+The product focuses on simulated soldering practice (approach, positioning,
+hold phases) on a fixed work area. Visual hand technique coaching only.
+A webcam cannot verify heat, solder flow, electrical connection, or joint metallurgy.
+"""
+
 from __future__ import annotations
 
 import copy
@@ -71,7 +79,86 @@ class ProcedureSchema(BaseModel):
 
 
 PROCEDURES: dict[str, dict[str, Any]] = {
-    # Keep the existing procedure_id so current clients continue working.
+    # ── Simulated Soldering Practice (Approach, Positioning, Hold phases) ──
+    "soldering_practice": {
+        "procedure_id": "soldering_practice",
+        "steps": [
+            {
+                "id": "approach_phase",
+                "name": "Approach Phase",
+                "description": "Enter work area with controlled iron angle.",
+                "method": "Hold iron in three-point pencil grip; angle tool toward joint (40°–65°).",
+                "feedback": {
+                    "correct": "Good approach angle. Ready to position tip.",
+                    "incorrect": "Adjust tool approach angle to enter the joint smoothly.",
+                },
+                "constraints": {
+                    "angles": {
+                        "wrist_index_angle": {"min": 40.0, "max": 70.0},
+                        "index_mcp_angle": {"min": 120.0, "max": 170.0},
+                    },
+                    "distances": {
+                        "thumb_index_distance": {"min": 0.0, "max": 0.45},
+                    },
+                },
+                "dwell_time_ms": 2000,
+                "next_step": "positioning_phase",
+            },
+            {
+                "id": "positioning_phase",
+                "name": "Positioning Phase",
+                "description": "Form precision tripod grip and rest heel of hand.",
+                "method": "Stabilize index PIP joint flexion and align tip to pad.",
+                "feedback": {
+                    "correct": "Iron position stable and aligned to pad.",
+                    "incorrect": "Adjust finger flexion to maintain firm iron control.",
+                },
+                "constraints": {
+                    "angles": {
+                        "index_pip_angle": {"min": 85.0, "max": 140.0},
+                        "wrist_index_angle": {"min": 35.0, "max": 60.0},
+                    },
+                    "distances": {
+                        "thumb_index_distance": {"min": 0.05, "max": 0.40},
+                    },
+                },
+                "dwell_time_ms": 2500,
+                "next_step": "hold_phase",
+            },
+            {
+                "id": "hold_phase",
+                "name": "Hold Phase (Joint Dwell)",
+                "description": "Maintain steady contact without tremor.",
+                "method": "Keep hand motionless during simulated thermal transfer.",
+                "feedback": {
+                    "correct": "Perfect stillness maintained throughout dwell.",
+                    "incorrect": "Hold completely steady; minimize hand tremble.",
+                },
+                "constraints": {
+                    "angles": {
+                        "wrist_index_angle": {"min": 35.0, "max": 55.0},
+                        "index_pip_angle": {"min": 90.0, "max": 135.0},
+                        "index_mcp_angle": {"min": 125.0, "max": 165.0},
+                    },
+                    "distances": {
+                        "thumb_index_distance": {"min": 0.05, "max": 0.35},
+                    },
+                },
+                "dwell_time_ms": 3000,
+                "next_step": "completed",
+            },
+            {
+                "id": "completed",
+                "name": "Completed",
+                "description": "Soldering technique procedure complete.",
+                "constraints": {"angles": {}, "distances": {}, "scalars": {}},
+                "dwell_time_ms": 0,
+                "next_step": "completed",
+            },
+        ],
+    },
+
+    # ── Backward-compatible surgical knot tying procedure ──
     "surgical_knot_tying": {
         "procedure_id": "surgical_knot_tying",
         "steps": [
@@ -119,7 +206,6 @@ PROCEDURES: dict[str, dict[str, Any]] = {
                 "constraints": {
                     "angles": {"wrist_index_angle": {"min": 70.0, "max": 110.0}},
                 },
-                # NOTE: intermediate values used as base; beginner overrides applied at load time.
                 "dwell_time_ms": 2000,
                 "next_step": "cutting_angle_control",
             },
@@ -167,19 +253,20 @@ PROCEDURES: dict[str, dict[str, Any]] = {
                 "next_step": "completed",
             },
         ],
-    }
+    },
 }
-
-
-# ---------------------------------------------------------------------------
-# Difficulty overrides
-# ---------------------------------------------------------------------------
-# Keys: step id -> constraint category -> constraint key -> replacement values.
-# The base PROCEDURES dict above holds the "intermediate" (strict) values.
-# Beginner gets wider tolerances applied at load time.
 
 DIFFICULTY_OVERRIDES: dict[str, dict[str, dict[str, dict[str, dict[str, float]]]]] = {
     "beginner": {
+        "approach_phase": {
+            "angles": {"wrist_index_angle": {"min": 35.0, "max": 75.0}},
+        },
+        "positioning_phase": {
+            "angles": {"index_pip_angle": {"min": 75.0, "max": 150.0}},
+        },
+        "hold_phase": {
+            "angles": {"wrist_index_angle": {"min": 30.0, "max": 60.0}},
+        },
         "initial_incision_position": {
             "angles": {"wrist_index_angle": {"min": 60.0, "max": 120.0}},
         },
@@ -190,7 +277,6 @@ DIFFICULTY_OVERRIDES: dict[str, dict[str, dict[str, dict[str, dict[str, float]]]
             "angles": {"wrist_index_angle": {"min": 30.0, "max": 60.0}},
         },
     },
-    # "intermediate" uses the base values from PROCEDURES (no overrides needed).
 }
 
 
@@ -198,10 +284,9 @@ def _apply_difficulty_overrides(
     raw: dict[str, Any],
     difficulty: str,
 ) -> dict[str, Any]:
-    """Return a deep-copied procedure dict with difficulty overrides merged in."""
     overrides = DIFFICULTY_OVERRIDES.get(difficulty)
     if not overrides:
-        return raw  # intermediate – no changes needed
+        return raw
 
     patched = copy.deepcopy(raw)
     for step in patched.get("steps", []):
@@ -237,4 +322,3 @@ def load_procedure_schema(
         )
     patched = _apply_difficulty_overrides(raw, difficulty)
     return ProcedureSchema.model_validate(patched)
-

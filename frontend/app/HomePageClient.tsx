@@ -1,78 +1,29 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import CameraFeed from "../features/hand-tracking/components/CameraFeed";
 import HandOverlay from "../features/hand-tracking/components/HandOverlay";
+import Metrics from "../features/realtime-feedback/components/Metrics";
 import { useTelemetry } from "../shared/contexts/TelemetryContext";
 import { API_URL_PREFIX } from "../shared/lib/constants";
-import type { DecayPrediction, SessionRecord } from "../shared/lib/types";
+import type {
+  DecayPrediction,
+  DetectionStateType,
+  MetricStatus,
+  SessionRecord,
+  SessionReport,
+} from "../shared/lib/types";
 
 type LandmarksDetail = {
   landmarks?: number[][];
+  detectionState?: DetectionStateType;
+  handedness?: string | null;
+  handednessConfidence?: number | null;
 };
 
 type OverlayVariant = "good" | "warn" | "bad";
 type Difficulty = "beginner" | "intermediate";
 type TabKey = "dashboard" | "analytics" | "procedures";
-
-const ANGLE_RANGES: Record<Difficulty, { incision: [number, number]; cutting: [number, number] }> = {
-  beginner: { incision: [60, 120], cutting: [30, 60] },
-  intermediate: { incision: [70, 110], cutting: [30, 45] },
-};
-
-function evaluateMax(value: number | undefined, max: number, warnSlack: number): OverlayVariant {
-  if (typeof value !== "number") return "warn";
-  if (value <= max) return "good";
-  if (value <= max + warnSlack) return "warn";
-  return "bad";
-}
-
-function evaluateRange(value: number | undefined, min: number, max: number, warnSlack: number): OverlayVariant {
-  if (typeof value !== "number") return "warn";
-  if (value >= min && value <= max) return "good";
-  if (value >= min - warnSlack && value <= max + warnSlack) return "warn";
-  return "bad";
-}
-
-function mergeVariant(states: OverlayVariant[]): OverlayVariant {
-  if (states.includes("bad")) return "bad";
-  if (states.includes("warn")) return "warn";
-  return "good";
-}
-
-function getStepOverlayVariant(
-  stepId: string | undefined,
-  angles: Record<string, number> | undefined,
-  distances: Record<string, number> | undefined,
-  difficulty: Difficulty,
-): OverlayVariant {
-  if (!stepId) return "warn";
-  const { incision, cutting } = ANGLE_RANGES[difficulty];
-
-  switch (stepId) {
-    case "thumb_index_precision_grip":
-      return evaluateMax(distances?.thumb_index_over_palm, 0.35, 0.1);
-    case "middle_finger_support":
-      return mergeVariant([
-        evaluateMax(distances?.index_middle_over_palm, 0.6, 0.12),
-        evaluateMax(angles?.index_middle_alignment, 75, 15),
-      ]);
-    case "initial_incision_position":
-      return evaluateRange(angles?.wrist_index_angle, incision[0], incision[1], 10);
-    case "cutting_angle_control":
-      return evaluateRange(angles?.wrist_index_angle, cutting[0], cutting[1], 10);
-    case "grip_stability":
-      return mergeVariant([
-        evaluateRange(angles?.wrist_index_angle, cutting[0], cutting[1], 10),
-        evaluateMax(distances?.thumb_index_over_palm, 0.35, 0.1),
-        evaluateMax(distances?.index_middle_over_palm, 0.6, 0.12),
-      ]);
-    case "completed":
-      return "good";
-    default:
-      return "warn";
-  }
-}
 
 function formatRetentionDate(iso: string | null | undefined): string {
   if (!iso) return "—";
@@ -97,6 +48,10 @@ function formatShortDate(iso: string | null | undefined): string {
 
 function formatProcedureLabel(value: string): string {
   const procedureLabels: Record<string, string> = {
+    soldering_practice: "Simulated Soldering",
+    approach_phase: "Approach Phase (Iron Angle)",
+    positioning_phase: "Positioning Phase (Tripod Grip)",
+    hold_phase: "Hold Phase (Thermal Dwell)",
     surgical_knot_tying: "Scalpel Handling",
   };
 
@@ -134,16 +89,26 @@ export default function HomePage() {
   const { connected, reconnecting, latest, send } = useTelemetry();
   const frameCounter = useRef(0);
   const landmarksRef = useRef<number[][]>([]);
+  const detectionStateRef = useRef<DetectionStateType>("no_hand");
+
+  const [selectedProcedure, setSelectedProcedure] = useState<string>("soldering_practice");
   const [difficulty, setDifficulty] = useState<Difficulty>("beginner");
   const difficultyRef = useRef<Difficulty>("beginner");
   const [activeTab, setActiveTab] = useState<TabKey>("dashboard");
   const [studentId, setStudentId] = useState("");
   const studentIdRef = useRef("");
   const [studentConfirmed, setStudentConfirmed] = useState(false);
+
+  // Calibration state (Phase A)
+  const [isCalibrated, setIsCalibrated] = useState(false);
+  const [stableFrameCount, setStableFrameCount] = useState(0);
+  const REQUIRED_STABLE_FRAMES = 15;
+
   const [decay, setDecay] = useState<DecayPrediction | null>(null);
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
   const [decayLoading, setDecayLoading] = useState(false);
   const [decayFetchFailed, setDecayFetchFailed] = useState(false);
+  const [activeSessionReport, setActiveSessionReport] = useState<SessionReport | null>(null);
   const prevStepRef = useRef<string | undefined>(undefined);
 
   const loadUserDbData = useCallback(async (sid: string) => {
@@ -182,21 +147,52 @@ export default function HomePage() {
     loadUserDbData(sid);
   }, [studentId, loadUserDbData]);
 
+  // Subscribe to raw landmark events from camera
   useEffect(() => {
     const handleLandmarks = (event: Event) => {
       const customEvent = event as CustomEvent<LandmarksDetail>;
       const points = customEvent.detail?.landmarks;
+      const state = customEvent.detail?.detectionState ?? "no_hand";
+      detectionStateRef.current = state;
+
       if (Array.isArray(points)) {
         landmarksRef.current = points;
+
+        // Calibration logic: check if hand is centered in guide box with 21 landmarks
+        if (!isCalibrated) {
+          if (points.length === 21) {
+            const wrist = points[0];
+            const middleTip = points[12];
+            // Check bounding area roughly within central box (0.2 to 0.8 on x, y)
+            const isInsideBox =
+              wrist[0] > 0.15 && wrist[0] < 0.85 &&
+              middleTip[0] > 0.15 && middleTip[0] < 0.85;
+
+            if (isInsideBox) {
+              setStableFrameCount((c) => {
+                const next = c + 1;
+                if (next >= REQUIRED_STABLE_FRAMES) {
+                  setIsCalibrated(true);
+                }
+                return next;
+              });
+            } else {
+              setStableFrameCount(0);
+            }
+          } else {
+            setStableFrameCount(0);
+          }
+        }
       }
     };
 
     window.addEventListener("skillsync:landmarks", handleLandmarks);
     return () => window.removeEventListener("skillsync:landmarks", handleLandmarks);
-  }, []);
+  }, [isCalibrated]);
 
+  // Frame streaming loop over WebSocket
   useEffect(() => {
-    if (!connected || !studentConfirmed || !studentIdRef.current) return;
+    if (!connected || !studentConfirmed || !studentIdRef.current || !isCalibrated) return;
 
     let intervalId: number | null = null;
     const sendFrame = () => {
@@ -204,7 +200,7 @@ export default function HomePage() {
         frame_id: frameCounter.current,
         timestamp_ms: Date.now(),
         landmarks: landmarksRef.current,
-        procedure_id: "surgical_knot_tying",
+        procedure_id: selectedProcedure,
         difficulty: difficultyRef.current,
         student_id: studentIdRef.current || "anonymous",
       });
@@ -234,87 +230,28 @@ export default function HomePage() {
       stop();
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [connected, send, studentConfirmed]);
+  }, [connected, send, studentConfirmed, isCalibrated, selectedProcedure]);
 
-  const scoreEmaRef = useRef(0.942);
-  const displayScoreRef = useRef(94);
-  const angleEmaRef = useRef<{ mcp: number | null; pip: number | null }>({ mcp: null, pip: null });
-  const angleTargetsRef = useRef<{ mcp: number | null; pip: number | null }>({ mcp: null, pip: null });
-  const angleDisplayRef = useRef({ mcp: 0, pip: 0 });
-  const [displayScorePercent, setDisplayScorePercent] = useState(94);
-  const [displayAngles, setDisplayAngles] = useState({ mcp: 0, pip: 0 });
+  // Real, un-fabricated score & state directly from backend (No artificial triple smoothing!)
+  const scorePercent = latest?.valid && latest?.frame_is_observed
+    ? Math.round(Math.max(0, Math.min(1, latest.score)) * 100)
+    : 0;
 
+  const currentDetectionState = latest?.detection_state ?? detectionStateRef.current;
+  const isObserved = latest?.frame_is_observed ?? false;
+  const isStale = (latest?.landmarks_estimated && !isObserved) ?? false;
+
+  const primaryFeedback =
+    currentDetectionState === "no_hand"
+      ? "No hand detected. Position your hand inside the work area."
+      : latest?.feedback?.[0]?.message ?? "Maintain iron approach angle steadily.";
+
+  // Handle session report when procedure completes
   useEffect(() => {
-    if (Array.isArray(latest?.landmarks) && latest.landmarks.length === 0) {
-      scoreEmaRef.current = 0;
-      displayScoreRef.current = 0;
-      setDisplayScorePercent(0);
-      return;
+    if (latest?.session_report) {
+      setActiveSessionReport(latest.session_report as SessionReport);
     }
-    if (latest?.score !== undefined) {
-      scoreEmaRef.current = scoreEmaRef.current * 0.97 + Math.max(0, Math.min(1, latest.score)) * 0.03;
-    }
-  }, [latest?.score]);
-
-  useEffect(() => {
-    if (Array.isArray(latest?.landmarks) && latest.landmarks.length === 0) {
-      angleEmaRef.current = { mcp: 0, pip: 0 };
-      angleTargetsRef.current = { mcp: 0, pip: 0 };
-      angleDisplayRef.current = { mcp: 0, pip: 0 };
-      setDisplayAngles({ mcp: 0, pip: 0 });
-      return;
-    }
-
-    const angles = latest?.angles;
-    if (!angles) return;
-    const newWeight = 0.085;
-    const blend = (prev: number | null, reading: number) =>
-      prev === null ? reading : prev * (1 - newWeight) + reading * newWeight;
-
-    if (typeof angles.mcp_joint === "number") {
-      angleEmaRef.current.mcp = blend(angleEmaRef.current.mcp, angles.mcp_joint);
-      angleTargetsRef.current.mcp = angleEmaRef.current.mcp;
-    }
-    if (typeof angles.pip_joint === "number") {
-      angleEmaRef.current.pip = blend(angleEmaRef.current.pip, angles.pip_joint);
-      angleTargetsRef.current.pip = angleEmaRef.current.pip;
-    }
-  }, [latest?.angles]);
-
-  useEffect(() => {
-    let raf = 0;
-    const angleRate = 0.052;
-    const angleSnapDeg = 0.18;
-
-    const tick = () => {
-      const target = Math.max(0, Math.min(100, Math.round(scoreEmaRef.current * 100)));
-      const prev = displayScoreRef.current;
-      const next = prev + (target - prev) * 0.045;
-      displayScoreRef.current = Math.abs(target - next) < 0.25 ? target : next;
-      setDisplayScorePercent(Math.round(displayScoreRef.current));
-
-      let { mcp: mcpD, pip: pipD } = angleDisplayRef.current;
-      const tm = angleTargetsRef.current.mcp;
-      const tp = angleTargetsRef.current.pip;
-      if (tm !== null) {
-        mcpD = mcpD + (tm - mcpD) * angleRate;
-        if (Math.abs(tm - mcpD) < angleSnapDeg) mcpD = tm;
-      }
-      if (tp !== null) {
-        pipD = pipD + (tp - pipD) * angleRate;
-        if (Math.abs(tp - pipD) < angleSnapDeg) pipD = tp;
-      }
-      angleDisplayRef.current = { mcp: mcpD, pip: pipD };
-      setDisplayAngles({ mcp: Math.round(mcpD * 10) / 10, pip: Math.round(pipD * 10) / 10 });
-      raf = requestAnimationFrame(tick);
-    };
-
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, []);
-
-  const scorePercent = displayScorePercent;
-  const primaryFeedback = latest?.feedback?.[0]?.message ?? "Hold position for 3 seconds to confirm joint stability.";
+  }, [latest?.session_report]);
 
   useEffect(() => {
     if (!latest?.skill_decay) return;
@@ -340,11 +277,10 @@ export default function HomePage() {
     if (enteredCompleted) loadUserDbData(sid);
   }, [latest?.step, studentConfirmed, loadUserDbData]);
 
-  useEffect(() => {
-    if (latest?.session_saved && studentIdRef.current) loadUserDbData(studentIdRef.current);
-  }, [latest?.session_saved, loadUserDbData]);
-
   const stepDescriptions: Record<string, string> = {
+    approach_phase: "Enter work area with steady iron angle (40°–70°).",
+    positioning_phase: "Form precision tripod grip and align tip with joint.",
+    hold_phase: "Hold steady contact for 3.0s dwell without trembling.",
     thumb_index_precision_grip: "Keep thumb and index finger close for precision grip.",
     middle_finger_support: "Use middle finger as supporting finger near index.",
     initial_incision_position: "Start with near-perpendicular tool orientation.",
@@ -354,13 +290,16 @@ export default function HomePage() {
   };
 
   const procedureSteps = latest?.procedure_steps || [
-    { id: "grip_init", dwell_time_ms: 700 },
-    { id: "hold_steady", dwell_time_ms: 3000 },
+    { id: "approach_phase", dwell_time_ms: 2000 },
+    { id: "positioning_phase", dwell_time_ms: 2500 },
+    { id: "hold_phase", dwell_time_ms: 3000 },
     { id: "completed", dwell_time_ms: 0 },
   ];
+
   const effectiveStepId = latest?.reset ? procedureSteps[0]?.id : latest?.step;
-  const overlayVariant = getStepOverlayVariant(effectiveStepId, latest?.angles, latest?.distances, difficulty);
+  const overlayVariant: OverlayVariant = latest?.valid ? "good" : latest?.landmarks?.length ? "warn" : "bad";
   const currentStepIndex = procedureSteps.findIndex((step) => step.id === effectiveStepId);
+
   const steps = procedureSteps.map((step, index) => {
     let state: "pending" | "active" | "done" = "pending";
     if (effectiveStepId === step.id) state = step.id === "completed" ? "done" : "active";
@@ -380,15 +319,23 @@ export default function HomePage() {
       return b.id - a.id;
     });
     const chartSessions = latestSessions.slice(0, 8).reverse();
-    const chartScores = chartSessions.map((session) => Math.round(Math.max(0, Math.min(1, session.final_score)) * 100));
+    const chartScores = chartSessions.map((session) =>
+      Math.round(Math.max(0, Math.min(1, session.final_score)) * 100)
+    );
     const averageScore = latestSessions.length
-      ? Math.round((latestSessions.reduce((sum, s) => sum + Math.max(0, Math.min(1, s.final_score)), 0) / latestSessions.length) * 100)
+      ? Math.round(
+          (latestSessions.reduce((sum, s) => sum + Math.max(0, Math.min(1, s.final_score)), 0) /
+            latestSessions.length) *
+            100
+        )
       : 0;
     const bestScore = latestSessions.length
       ? Math.round(Math.max(...latestSessions.map((s) => Math.max(0, Math.min(1, s.final_score)))) * 100)
       : 0;
     const completionRate = latestSessions.length
-      ? Math.round((latestSessions.filter((s) => s.passed !== false).length / latestSessions.length) * 100)
+      ? Math.round(
+          (latestSessions.filter((s) => s.passed !== false).length / latestSessions.length) * 100
+        )
       : 0;
 
     return {
@@ -405,26 +352,68 @@ export default function HomePage() {
             ? `${Math.ceil(decay.days_until_decay)} days`
             : "Due now"
           : "Pending",
-      analyticsStatus: decay?.refresher_needed ? "Refresher recommended" : decay ? "Retention stable" : "Waiting for data",
+      analyticsStatus: decay?.refresher_needed
+        ? "Refresher recommended"
+        : decay
+        ? "Retention stable"
+        : "Waiting for data",
     };
   }, [sessions, decay]);
 
   return (
     <main className="dashboard-shell">
+      {/* Product Dislaimer Banner */}
+      <div className="disclaimer-banner">
+        <div>
+          <span className="disclaimer-badge">Technique Coach</span>
+          <span>
+            Visual hand technique practice only. A standard camera cannot verify iron temperature,
+            contact force, electrical continuity, or solder joint metallurgy.
+          </span>
+        </div>
+        <span className="text-xs text-slate-500">Fixed Work Area · 1 Hand</span>
+      </div>
+
       <header className="topbar">
         <div className="brand-area">
           <h1 className="brand-name">SkillSync</h1>
           <nav className="top-nav" aria-label="Primary navigation">
-            <button type="button" className={`top-nav-link ${activeTab === "dashboard" ? "active" : ""}`} onClick={() => setActiveTab("dashboard")}>Dashboard</button>
-            <button type="button" className={`top-nav-link ${activeTab === "analytics" ? "active" : ""}`} onClick={() => setActiveTab("analytics")}>Analytics</button>
-            <button type="button" className={`top-nav-link ${activeTab === "procedures" ? "active" : ""}`} onClick={() => setActiveTab("procedures")}>Procedures</button>
+            <button
+              type="button"
+              className={`top-nav-link ${activeTab === "dashboard" ? "active" : ""}`}
+              onClick={() => setActiveTab("dashboard")}
+            >
+              Dashboard
+            </button>
+            <button
+              type="button"
+              className={`top-nav-link ${activeTab === "analytics" ? "active" : ""}`}
+              onClick={() => setActiveTab("analytics")}
+            >
+              Analytics
+            </button>
+            <button
+              type="button"
+              className={`top-nav-link ${activeTab === "procedures" ? "active" : ""}`}
+              onClick={() => setActiveTab("procedures")}
+            >
+              Procedures
+            </button>
           </nav>
         </div>
         <div className="top-actions">
-          <div className="search-pill">{activeTab === "analytics" ? "Search sessions..." : "Search data..."}</div>
-          <button className="icon-btn" aria-label="Notifications">N</button>
-          <button className="icon-btn" aria-label="Settings">S</button>
-          <div className="avatar">{studentConfirmed ? studentId.slice(0, 2).toUpperCase() : "GH"}</div>
+          <div className="search-pill">
+            {activeTab === "analytics" ? "Search sessions..." : "Search data..."}
+          </div>
+          <button className="icon-btn" aria-label="Notifications">
+            N
+          </button>
+          <button className="icon-btn" aria-label="Settings">
+            S
+          </button>
+          <div className="avatar">
+            {studentConfirmed ? studentId.slice(0, 2).toUpperCase() : "SS"}
+          </div>
         </div>
       </header>
 
@@ -439,9 +428,17 @@ export default function HomePage() {
               placeholder="Enter your name to start tracking..."
               value={studentId}
               onChange={(e) => setStudentId(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") confirmStudent(); }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") confirmStudent();
+              }}
             />
-            <button className="student-btn" onClick={confirmStudent} disabled={!studentId.trim()}>Start Session</button>
+            <button
+              className="student-btn"
+              onClick={confirmStudent}
+              disabled={!studentId.trim()}
+            >
+              Start Session
+            </button>
           </div>
         </div>
       )}
@@ -450,73 +447,207 @@ export default function HomePage() {
         <section className="content-grid">
           <section className="viewer-panel">
             <div className="viewer-badges">
-              <span className="badge badge-live">{connected ? "LIVE TRACKING" : "OFFLINE"}</span>
-              <span className="badge badge-stream">FHD STREAM</span>
+              <span className="badge badge-live">
+                {connected ? "LIVE TRACKING" : "OFFLINE"}
+              </span>
+
+              {/* Explicit Detection State Pill (Phase A) */}
+              <span className={`detection-pill detection-pill--${currentDetectionState}`}>
+                {currentDetectionState.replace("_", " ")}
+              </span>
+
               <div className="diff-inline" role="radiogroup" aria-label="Difficulty level">
-                <button id="difficulty-beginner" className={`diff-pill ${difficulty === "beginner" ? "diff-pill--active" : ""}`} onClick={() => { setDifficulty("beginner"); difficultyRef.current = "beginner"; }} aria-pressed={difficulty === "beginner"}>Beginner</button>
-                <button id="difficulty-intermediate" className={`diff-pill ${difficulty === "intermediate" ? "diff-pill--active" : ""}`} onClick={() => { setDifficulty("intermediate"); difficultyRef.current = "intermediate"; }} aria-pressed={difficulty === "intermediate"}>Intermediate</button>
+                <button
+                  id="difficulty-beginner"
+                  className={`diff-pill ${difficulty === "beginner" ? "diff-pill--active" : ""}`}
+                  onClick={() => {
+                    setDifficulty("beginner");
+                    difficultyRef.current = "beginner";
+                  }}
+                  aria-pressed={difficulty === "beginner"}
+                >
+                  Beginner
+                </button>
+                <button
+                  id="difficulty-intermediate"
+                  className={`diff-pill ${difficulty === "intermediate" ? "diff-pill--active" : ""}`}
+                  onClick={() => {
+                    setDifficulty("intermediate");
+                    difficultyRef.current = "intermediate";
+                  }}
+                  aria-pressed={difficulty === "intermediate"}
+                >
+                  Intermediate
+                </button>
               </div>
             </div>
+
             <div className="hand-stage" aria-label="Live hand stage">
               <div className="stage-glow" />
               <CameraFeed compact />
-              <HandOverlay variant={overlayVariant} />
-              {!connected && <div className="stage-empty">{reconnecting ? "Reconnecting to live scoring..." : "Waiting for backend websocket..."}</div>}
+
+              {/* Hand Overlay with Calibration Box and Stale State */}
+              <HandOverlay
+                variant={overlayVariant}
+                isStale={isStale}
+                showCalibrationBox={!isCalibrated}
+                calibrationProgress={stableFrameCount / REQUIRED_STABLE_FRAMES}
+              />
+
+              {/* Calibration Modal / Guide Overlay */}
+              {studentConfirmed && !isCalibrated && (
+                <div className="calibration-overlay">
+                  <div className="calibration-card">
+                    <h3 className="text-lg font-bold mb-2">Camera Calibration</h3>
+                    <p className="text-xs text-slate-300 mb-4">
+                      Position your hand inside the central guide box. Keep your wrist, palm, and all
+                      5 fingers clearly visible with no extreme rotation.
+                    </p>
+
+                    <div className="calibration-progress-bar">
+                      <div
+                        className="calibration-progress-fill"
+                        style={{
+                          width: `${(stableFrameCount / REQUIRED_STABLE_FRAMES) * 100}%`,
+                        }}
+                      />
+                    </div>
+
+                    <p className="text-xs text-emerald-400 font-semibold">
+                      {stableFrameCount > 0
+                        ? `Calibrating: ${stableFrameCount}/${REQUIRED_STABLE_FRAMES} stable frames`
+                        : "Align hand inside guide box to begin"}
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {!connected && (
+                <div className="stage-empty">
+                  {reconnecting
+                    ? "Reconnecting to live scoring..."
+                    : "Waiting for backend websocket..."}
+                </div>
+              )}
+
               <div className="status-card status-card--stage">
-                <div className="status-icon">A</div>
+                <div className="status-icon">AI</div>
                 <div>
-                  <p className="status-title">AI Calibration Active</p>
+                  <p className="status-title">
+                    {isCalibrated ? "Soldering Technique Coach" : "Hand Calibration"}
+                  </p>
                   <p className="status-subtitle">{primaryFeedback}</p>
                 </div>
-                <div className="status-bars" aria-hidden="true"><span /><span /><span /></div>
               </div>
             </div>
           </section>
 
           <aside className="insights-panel" aria-label="Live metrics">
+            {/* Score Card */}
             <article className="metric-card">
-              <div className="metric-head"><span className="metric-icon">B</span><span className="metric-chip">OPTIMAL</span></div>
-              <p className="metric-value">{scorePercent}<span>%</span></p>
-              <p className="metric-label">Grip Stability Confidence Score</p>
-              <div className="progress-track"><span style={{ width: `${scorePercent}%` }} /></div>
-            </article>
-
-            <article className="angles-card">
-              <h2>Joint Angles</h2>
-              <div className="angles-grid">
-                <div><p>MCP JOINT</p><strong>{displayAngles.mcp.toFixed(1)} deg</strong></div>
-                <div><p>PIP JOINT</p><strong>{displayAngles.pip.toFixed(1)} deg</strong></div>
+              <div className="metric-head">
+                <span className="metric-icon">★</span>
+                <span className="metric-chip">
+                  {scorePercent >= 80 ? "OPTIMAL" : scorePercent > 40 ? "TRAINING" : "POSITIONING"}
+                </span>
+              </div>
+              <p className="metric-value">
+                {scorePercent}
+                <span>%</span>
+              </p>
+              <p className="metric-label">Technique Compliance Score</p>
+              <div className="progress-track">
+                <span style={{ width: `${scorePercent}%` }} />
               </div>
             </article>
 
+            {/* Live Measurements with 3-State Badges (Metrics.tsx) */}
+            <Metrics
+              angles={latest?.angles ?? {}}
+              distances={latest?.distances ?? {}}
+              targets={latest?.metric_targets ?? {}}
+              deviations={latest?.metric_deviations ?? {}}
+              statuses={latest?.metric_statuses ?? {}}
+            />
+
+            {/* Procedure Steps Gating */}
             <article className="steps-card">
-              <div className="steps-head"><h2>Procedure Steps</h2><span>STEP {Math.max(1, currentStepIndex + 1)} OF {procedureSteps.length}</span></div>
+              <div className="steps-head">
+                <h2>Practice Steps</h2>
+                <span>
+                  STEP {Math.max(1, currentStepIndex + 1)} OF {procedureSteps.length}
+                </span>
+              </div>
               <ul className="steps-list">
                 {steps.map((step) => (
                   <li key={step.title} className={`step-row ${step.state}`}>
                     <span className="step-dot" aria-hidden="true" />
-                    <div><p>{step.title}</p><small>{step.detail}</small></div>
+                    <div>
+                      <p>{step.title}</p>
+                      <small>{step.detail}</small>
+                    </div>
                   </li>
                 ))}
               </ul>
             </article>
-
-            <article className="analytics-preview-card">
-              <div className="analytics-preview-head">
-                <div>
-                  <p className="analytics-preview-label">Analytics Hub</p>
-                  <h2>Database intelligence now lives in its own view.</h2>
-                </div>
-                <button type="button" className="analytics-link-btn" onClick={() => setActiveTab("analytics")}>Open Analytics</button>
-              </div>
-              <div className="analytics-preview-grid">
-                <div><strong>{decay ? `${Math.round(decay.current_competency * 100)}%` : "—"}</strong><span>Competency</span></div>
-                <div><strong>{analytics.latestSessions.length}</strong><span>Logged sessions</span></div>
-                <div><strong>{analytics.bestScore ? `${analytics.bestScore}%` : "—"}</strong><span>Best run</span></div>
-              </div>
-            </article>
           </aside>
         </section>
+      )}
+
+      {/* Session Report Modal (Phase E) */}
+      {activeSessionReport && (
+        <div className="report-modal">
+          <div className="report-card">
+            <div className="report-header">
+              <h2 className="text-xl font-bold text-slate-800">Practice Session Report</h2>
+              <p className="text-sm text-slate-500">
+                Completed {formatProcedureLabel(activeSessionReport.procedure_id)} (
+                {activeSessionReport.difficulty})
+              </p>
+            </div>
+
+            <div className="report-grid">
+              <div className="report-stat">
+                <span>Technique Score</span>
+                <strong>{activeSessionReport.final_score_pct}%</strong>
+              </div>
+
+              <div className="report-stat">
+                <span>Valid Observed Coverage</span>
+                <strong>{activeSessionReport.coverage_pct}%</strong>
+              </div>
+
+              <div className="report-stat">
+                <span>Broken Hold Attempts</span>
+                <strong>{activeSessionReport.failed_attempts}</strong>
+              </div>
+
+              <div className="report-stat">
+                <span>Time to First Valid Hold</span>
+                <strong>
+                  {activeSessionReport.time_to_first_valid_hold_ms
+                    ? `${(activeSessionReport.time_to_first_valid_hold_ms / 1000).toFixed(1)}s`
+                    : "—"}
+                </strong>
+              </div>
+            </div>
+
+            <div className="report-recommendation">
+              <strong>Coaching Recommendation:</strong>
+              <p className="mt-1">{activeSessionReport.recommendation}</p>
+            </div>
+
+            <div className="flex justify-end gap-3 mt-4">
+              <button
+                type="button"
+                className="student-btn"
+                onClick={() => setActiveSessionReport(null)}
+              >
+                Close Report & Continue
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {activeTab === "analytics" && (
@@ -524,12 +655,25 @@ export default function HomePage() {
           <section className="analytics-hero">
             <div className="analytics-hero-copy">
               <p className="analytics-kicker">Learner Intelligence</p>
-              <h2>{studentConfirmed ? `Performance story for ${studentId || studentIdRef.current}` : "Unlock your session intelligence"}</h2>
-              <p>A dedicated analytics canvas for retention timing, session quality, score movement, and the full database timeline instead of crowding the live tracking surface.</p>
+              <h2>
+                {studentConfirmed
+                  ? `Performance history for ${studentId || studentIdRef.current}`
+                  : "Unlock your session intelligence"}
+              </h2>
+              <p>
+                A dedicated analytics canvas for retention timing, session quality, score trend, and
+                the full database timeline.
+              </p>
             </div>
             <div className="analytics-hero-badges">
-              <span className="analytics-flag analytics-flag--primary">{analytics.analyticsStatus}</span>
-              <span className="analytics-flag">{studentConfirmed ? `${analytics.latestSessions.length} sessions tracked` : "Awaiting learner"}</span>
+              <span className="analytics-flag analytics-flag--primary">
+                {analytics.analyticsStatus}
+              </span>
+              <span className="analytics-flag">
+                {studentConfirmed
+                  ? `${analytics.latestSessions.length} sessions tracked`
+                  : "Awaiting learner"}
+              </span>
             </div>
           </section>
 
@@ -540,41 +684,96 @@ export default function HomePage() {
                   <div className="analytics-card-head">
                     <div>
                       <p className="analytics-card-label">Retention Pulse</p>
-                      <h3>{decay ? `${Math.round(decay.current_competency * 100)}% competency` : "No retention model yet"}</h3>
+                      <h3>
+                        {decay
+                          ? `${Math.round(decay.current_competency * 100)}% competency`
+                          : "No retention model yet"}
+                      </h3>
                     </div>
-                    {decay?.refresher_needed && <span className="refresher-badge">REFRESHER DUE</span>}
+                    {decay?.refresher_needed && (
+                      <span className="refresher-badge">REFRESHER DUE</span>
+                    )}
                   </div>
-                  <div className="pulse-meter"><div className="pulse-meter-fill" style={{ width: `${decay ? Math.round(decay.current_competency * 100) : 0}%` }} /><div className="pulse-meter-threshold" /></div>
+                  <div className="pulse-meter">
+                    <div
+                      className="pulse-meter-fill"
+                      style={{
+                        width: `${decay ? Math.round(decay.current_competency * 100) : 0}%`,
+                      }}
+                    />
+                    <div className="pulse-meter-threshold" />
+                  </div>
                   <div className="analytics-stat-row">
-                    <div className="analytics-stat-block"><span>Projected decay</span><strong>{formatRetentionDate(decay?.projected_decay_date)}</strong></div>
-                    <div className="analytics-stat-block"><span>Refresher plan</span><strong>{formatRetentionDate(decay?.refresher_date)}</strong></div>
+                    <div className="analytics-stat-block">
+                      <span>Projected decay</span>
+                      <strong>{formatRetentionDate(decay?.projected_decay_date)}</strong>
+                    </div>
+                    <div className="analytics-stat-block">
+                      <span>Refresher plan</span>
+                      <strong>{formatRetentionDate(decay?.refresher_date)}</strong>
+                    </div>
                   </div>
                   <div className="analytics-mini-grid">
-                    <div className="analytics-mini-card"><span>Days until decay</span><strong>{analytics.daysUntilDecay}</strong></div>
-                    <div className="analytics-mini-card"><span>Decay rate</span><strong>{decay ? `${(decay.decay_rate * 100).toFixed(1)}%/day` : "—"}</strong></div>
-                    <div className="analytics-mini-card"><span>Last session</span><strong>{formatShortDate(decay?.last_session_date)}</strong></div>
+                    <div className="analytics-mini-card">
+                      <span>Days until decay</span>
+                      <strong>{analytics.daysUntilDecay}</strong>
+                    </div>
+                    <div className="analytics-mini-card">
+                      <span>Decay rate</span>
+                      <strong>
+                        {decay ? `${(decay.decay_rate * 100).toFixed(1)}%/day` : "—"}
+                      </strong>
+                    </div>
+                    <div className="analytics-mini-card">
+                      <span>Last session</span>
+                      <strong>{formatShortDate(decay?.last_session_date)}</strong>
+                    </div>
                   </div>
                 </article>
 
                 <article className="analytics-card analytics-card--scoreboard">
                   <div className="analytics-card-head">
-                    <div><p className="analytics-card-label">Session Scoreboard</p><h3>Latest outcomes in sequence</h3></div>
+                    <div>
+                      <p className="analytics-card-label">Session Scoreboard</p>
+                      <h3>Latest outcomes in sequence</h3>
+                    </div>
                   </div>
                   <div className="scoreboard-grid">
-                    <div className="scoreboard-tile"><span>Average</span><strong>{analytics.averageScore}%</strong></div>
-                    <div className="scoreboard-tile"><span>Best</span><strong>{analytics.bestScore}%</strong></div>
-                    <div className="scoreboard-tile"><span>Completion</span><strong>{analytics.completionRate}%</strong></div>
-                    <div className="scoreboard-tile"><span>Total sessions</span><strong>{analytics.latestSessions.length}</strong></div>
+                    <div className="scoreboard-tile">
+                      <span>Average</span>
+                      <strong>{analytics.averageScore}%</strong>
+                    </div>
+                    <div className="scoreboard-tile">
+                      <span>Best</span>
+                      <strong>{analytics.bestScore}%</strong>
+                    </div>
+                    <div className="scoreboard-tile">
+                      <span>Completion</span>
+                      <strong>{analytics.completionRate}%</strong>
+                    </div>
+                    <div className="scoreboard-tile">
+                      <span>Total sessions</span>
+                      <strong>{analytics.latestSessions.length}</strong>
+                    </div>
                   </div>
                 </article>
               </section>
 
               <section className="analytics-grid analytics-grid--bottom">
                 <article className="analytics-card analytics-card--chart">
-                  <div className="analytics-card-head"><div><p className="analytics-card-label">Performance Curve</p><h3>Recent score trend</h3></div></div>
+                  <div className="analytics-card-head">
+                    <div>
+                      <p className="analytics-card-label">Performance Curve</p>
+                      <h3>Recent score trend</h3>
+                    </div>
+                  </div>
                   {analytics.chartSessions.length > 0 ? (
                     <div className="score-chart">
-                      <svg viewBox="0 0 520 220" className="score-chart-svg" aria-label="Recent score trend">
+                      <svg
+                        viewBox="0 0 520 220"
+                        className="score-chart-svg"
+                        aria-label="Recent score trend"
+                      >
                         <defs>
                           <linearGradient id="score-line" x1="0%" y1="0%" x2="100%" y2="0%">
                             <stop offset="0%" stopColor="#13b2cf" />
@@ -583,54 +782,170 @@ export default function HomePage() {
                         </defs>
                         {[0, 25, 50, 75, 100].map((tick) => {
                           const y = 180 - (tick / 100) * 180;
-                          return <g key={tick}><line x1="0" x2="520" y1={y} y2={y} className="chart-grid-line" /><text x="0" y={y - 6} className="chart-grid-label">{tick}</text></g>;
+                          return (
+                            <g key={tick}>
+                              <line x1="0" x2="520" y1={y} y2={y} className="chart-grid-line" />
+                              <text x="0" y={y - 6} className="chart-grid-label">
+                                {tick}
+                              </text>
+                            </g>
+                          );
                         })}
                         <path d={analytics.chartPath} className="chart-line" />
                         {analytics.chartScores.map((score, index) => {
-                          const x = analytics.chartScores.length === 1 ? 260 : (index / (analytics.chartScores.length - 1)) * 520;
+                          const x =
+                            analytics.chartScores.length === 1
+                              ? 260
+                              : (index / (analytics.chartScores.length - 1)) * 520;
                           const y = 180 - (score / 100) * 180;
-                          return <circle key={`${score}-${index}`} cx={x} cy={y} r="5.5" className="chart-point" />;
+                          return (
+                            <circle
+                              key={`${score}-${index}`}
+                              cx={x}
+                              cy={y}
+                              r="5.5"
+                              className="chart-point"
+                            />
+                          );
                         })}
                       </svg>
-                      <div className="chart-label-row">{analytics.chartSessions.map((session) => <span key={session.id}>{formatShortDate(session.completed_at)}</span>)}</div>
+                      <div className="chart-label-row">
+                        {analytics.chartSessions.map((session) => (
+                          <span key={session.id}>{formatShortDate(session.completed_at)}</span>
+                        ))}
+                      </div>
                     </div>
-                  ) : <p className="analytics-empty">Complete a few sessions and the score curve will render here.</p>}
+                  ) : (
+                    <p className="analytics-empty">
+                      Complete a few sessions and the score curve will render here.
+                    </p>
+                  )}
                 </article>
 
                 <article className="analytics-card analytics-card--timeline">
-                  <div className="analytics-card-head"><div><p className="analytics-card-label">Database Timeline</p><h3>Latest sessions from SQLite</h3></div></div>
+                  <div className="analytics-card-head">
+                    <div>
+                      <p className="analytics-card-label">Database Timeline</p>
+                      <h3>Latest sessions from SQLite</h3>
+                    </div>
+                  </div>
                   {decayLoading && analytics.latestSessions.length === 0 && !decay ? (
                     <p className="analytics-empty">Loading session history...</p>
                   ) : decayFetchFailed && !decay && !decayLoading ? (
-                    <p className="analytics-empty analytics-empty--error">Could not load analytics. Check that the backend proxy is reachable from this device.</p>
+                    <p className="analytics-empty analytics-empty--error">
+                      Could not load analytics. Check that the backend proxy is reachable from this
+                      device.
+                    </p>
                   ) : analytics.latestSessions.length > 0 ? (
                     <ul className="session-timeline" aria-label="Past sessions from database">
                       {analytics.latestSessions.map((session, index) => (
                         <li key={session.id} className="timeline-item">
-                          <div className="timeline-rail"><span className="timeline-dot" />{index < analytics.latestSessions.length - 1 && <span className="timeline-line" />}</div>
+                          <div className="timeline-rail">
+                            <span className="timeline-dot" />
+                            {index < analytics.latestSessions.length - 1 && (
+                              <span className="timeline-line" />
+                            )}
+                          </div>
                           <div className="timeline-card">
                             <div className="timeline-card-main">
-                              <div><strong>{formatRetentionDate(session.completed_at)}</strong><p>{formatProcedureLabel(session.procedure_id)} · {formatDifficultyLabel(session.difficulty)}</p></div>
-                              <div className="timeline-score">{Math.round(session.final_score * 100)}%</div>
+                              <div>
+                                <strong>{formatRetentionDate(session.completed_at)}</strong>
+                                <p>
+                                  {formatProcedureLabel(session.procedure_id)} ·{" "}
+                                  {formatDifficultyLabel(session.difficulty)}
+                                </p>
+                              </div>
+                              <div className="timeline-score">
+                                {Math.round(session.final_score * 100)}%
+                              </div>
                             </div>
-                            <div className="timeline-meta"><span>{session.passed === false ? "Needs review" : "Passed"}</span><span>{session.attempt_count} attempts</span><span>{Math.round(session.duration_ms / 1000)}s duration</span></div>
+                            <div className="timeline-meta">
+                              <span>{session.passed === false ? "Needs review" : "Passed"}</span>
+                              <span>{session.attempt_count} attempts</span>
+                              <span>{Math.round(session.duration_ms / 1000)}s duration</span>
+                            </div>
                           </div>
                         </li>
                       ))}
                     </ul>
-                  ) : <p className="analytics-empty">Enter your name and complete a procedure once. Your full retention history will appear here.</p>}
+                  ) : (
+                    <p className="analytics-empty">
+                      Enter your name and complete a procedure once. Your full retention history will
+                      appear here.
+                    </p>
+                  )}
                 </article>
               </section>
             </>
           ) : (
-            <article className="analytics-card analytics-card--empty"><p className="analytics-empty">Confirm a learner name first. Analytics will light up as soon as the first session is saved.</p></article>
+            <article className="analytics-card analytics-card--empty">
+              <p className="analytics-empty">
+                Confirm a learner name first. Analytics will light up as soon as the first session is
+                saved.
+              </p>
+            </article>
           )}
         </section>
       )}
 
       {activeTab === "procedures" && (
         <section className="procedures-shell">
-          <article className="analytics-card analytics-card--empty"><p className="analytics-empty">Procedures is ready for future multi-skill expansion. The current live workflow stays focused on surgical knot tying.</p></article>
+          <div className="analytics-hero mb-6">
+            <div className="analytics-hero-copy">
+              <p className="analytics-kicker">Training Modules</p>
+              <h2>Select Precision Practice Task</h2>
+              <p>Camera-assisted physical skill guidance with joint angle verification.</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <article
+              className={`analytics-card cursor-pointer p-6 border-2 transition ${
+                selectedProcedure === "soldering_practice"
+                  ? "border-cyan-600 bg-cyan-50/20"
+                  : "border-slate-200"
+              }`}
+              onClick={() => {
+                setSelectedProcedure("soldering_practice");
+                setIsCalibrated(false);
+                setStableFrameCount(0);
+                setActiveTab("dashboard");
+              }}
+            >
+              <span className="text-xs font-bold text-cyan-600 uppercase">Primary Task</span>
+              <h3 className="text-lg font-bold text-slate-800 mt-1">Simulated Soldering Practice</h3>
+              <p className="text-xs text-slate-500 mt-1">
+                Approach, positioning, and 3-second thermal dwell hold on a fixed work area.
+                Coaches visual pencil grip angle and steadiness.
+              </p>
+              <button className="student-btn mt-4">
+                {selectedProcedure === "soldering_practice" ? "Active Task" : "Select Task"}
+              </button>
+            </article>
+
+            <article
+              className={`analytics-card cursor-pointer p-6 border-2 transition ${
+                selectedProcedure === "surgical_knot_tying"
+                  ? "border-cyan-600 bg-cyan-50/20"
+                  : "border-slate-200"
+              }`}
+              onClick={() => {
+                setSelectedProcedure("surgical_knot_tying");
+                setIsCalibrated(false);
+                setStableFrameCount(0);
+                setActiveTab("dashboard");
+              }}
+            >
+              <span className="text-xs font-bold text-slate-500 uppercase">Secondary Task</span>
+              <h3 className="text-lg font-bold text-slate-800 mt-1">Scalpel Handling</h3>
+              <p className="text-xs text-slate-500 mt-1">
+                Precision grip, finger support, initial incision positioning, and cutting angle control.
+              </p>
+              <button className="student-btn mt-4">
+                {selectedProcedure === "surgical_knot_tying" ? "Active Task" : "Select Task"}
+              </button>
+            </article>
+          </div>
         </section>
       )}
     </main>

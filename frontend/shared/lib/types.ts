@@ -22,7 +22,6 @@ export type DecayPrediction = {
   refresher_needed: boolean;
 };
 
-/** Row from GET /api/students/{id}/sessions (SQLite `passed` as bool in JSON). */
 export type SessionRecord = {
   id: number;
   procedure_id: string;
@@ -36,6 +35,37 @@ export type SessionRecord = {
   passed: boolean;
 };
 
+export type MetricStatus = "within_range" | "outside_range" | "unavailable";
+
+export type SessionReport = {
+  student_id: string;
+  procedure_id: string;
+  difficulty: string;
+  final_score: number;
+  final_score_pct: number;
+  duration_ms: number;
+  completed_steps: string[];
+  failed_attempts: number;
+  time_to_first_valid_hold_ms: number | null;
+  observed_frames: number;
+  estimated_frames: number;
+  total_frames: number;
+  coverage_pct: number;
+  avg_hesitation_ms: number;
+  avg_deviation: number;
+  tremor_score: number;
+  step_breakdown: Record<string, {
+    failed_attempts: number;
+    valid_observed_frames: number;
+    coverage_pct: number;
+    avg_deviation: number;
+  }>;
+  recommended_repeats: string[];
+  recommendation: string;
+};
+
+export type DetectionStateType = "no_hand" | "hand_detected" | "partial_or_unreliable" | "tracking_recovered";
+
 export type FrameResponse = {
   step: string;
   valid: boolean;
@@ -44,12 +74,18 @@ export type FrameResponse = {
   landmarks?: number[][];
   joint_confidence?: Record<string, number>;
   landmarks_estimated?: boolean;
-  angles?: Record<string, number>;
-  distances?: Record<string, number>;
+  frame_is_observed?: boolean;
+  detection_state?: DetectionStateType;
+  angles?: Record<string, number | null>;
+  distances?: Record<string, number | null>;
+  metric_targets?: Record<string, { min?: number; max?: number }>;
+  metric_deviations?: Record<string, number | null>;
+  metric_statuses?: Record<string, MetricStatus>;
   procedure_steps?: StepInfo[];
   reset?: boolean;
   difficulty?: string;
   session_saved?: boolean;
+  session_report?: SessionReport | null;
   fatigue?: {
     fatigue_level: string;
     fatigue_score: number;

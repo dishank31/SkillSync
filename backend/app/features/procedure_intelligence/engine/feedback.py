@@ -1,66 +1,130 @@
-from app.features.realtime_feedback.schemas.response import FeedbackItem
+"""
+Generates specific, explainable real-time feedback for procedure coaching.
+
+Rules:
+- Feedback must be specific and only shown for reliable measurements.
+  e.g. "Index PIP angle is 18° above the target range."
+- Show ONE correction at a time (the largest deviation).
+- If measurements are unavailable, guide the learner to keep their hand in view.
+"""
+
+from __future__ import annotations
 
 from app.features.procedure_intelligence.engine.rules import ValidationResult
 from app.features.procedure_intelligence.engine.state_machine import StepUpdate
+from app.features.realtime_feedback.schemas.response import FeedbackItem
 
-
-_PLAIN_FEEDBACK_BY_CONSTRAINT: dict[str, str] = {
-    "thumb_index_over_palm": "Bring your thumb and index finger a little closer.",
-    "index_middle_over_palm": "Move your middle finger closer to your index finger.",
-    "index_middle_alignment": "Keep your index and middle finger aligned.",
-    "middle_below_index": "Place your middle finger slightly below your index finger for support.",
-    "wrist_index_angle": "Adjust your wrist angle and hold it steady.",
+_METRIC_LABELS: dict[str, str] = {
+    "index_mcp_angle": "Index MCP angle",
+    "mcp_joint": "Index MCP angle",
+    "index_pip_angle": "Index PIP angle",
+    "pip_joint": "Index PIP angle",
+    "index_dip_angle": "Index DIP angle",
+    "wrist_index_angle": "Wrist-index angle",
+    "thumb_index_angle": "Thumb-index spread",
+    "index_middle_alignment": "Index-middle alignment",
+    "thumb_index_distance": "Thumb-index pinch distance",
+    "thumb_index_over_palm": "Thumb-index pinch distance",
+    "index_middle_distance": "Index-middle distance",
+    "index_middle_over_palm": "Index-middle distance",
+    "middle_below_index": "Middle finger support position",
 }
 
 
-def _violation_feedback_items(*, violations: list[dict]) -> list[FeedbackItem]:
-    if not violations:
-        return [
-            FeedbackItem(
-                code="CONSTRAINT_INVALID",
-                message="You are close. Adjust your hand position slightly and try again.",
-                severity="warning",
-            )
-        ]
+def _format_violation_feedback(violation: dict) -> FeedbackItem:
+    key = str(violation.get("constraint_key") or "measurement")
+    label = _METRIC_LABELS.get(key, key.replace("_", " ").title())
+    dev = float(violation.get("deviation_amount", 0.0))
+    direction = str(violation.get("direction", "above"))
 
-    primary = violations[0]
-    key = str(primary.get("constraint_key") or "constraint")
-    plain_message = _PLAIN_FEEDBACK_BY_CONSTRAINT.get(
-        key,
-        "Adjust your grip and try to match the target position.",
+    is_angle = "angle" in key or "joint" in key or "alignment" in key
+
+    if is_angle:
+        dev_str = f"{int(round(abs(dev)))}°"
+        msg = f"{label} is {dev_str} {direction} the target range."
+    else:
+        # Distance or scalar
+        if "thumb_index" in key and direction == "above":
+            msg = f"{label} is too wide. Bring your thumb and index finger closer."
+        elif "thumb_index" in key and direction == "below":
+            msg = f"{label} is too tight. Open your thumb and index pinch slightly."
+        elif "index_middle" in key:
+            msg = f"Move your middle finger closer to your index finger for support."
+        else:
+            msg = f"{label} is {direction} target range."
+
+    return FeedbackItem(
+        code=f"{key.upper()}_VIOLATION",
+        message=msg,
+        severity="warning",
     )
-
-    return [
-        FeedbackItem(
-            code=f"{key.upper()}_VIOLATION",
-            message=plain_message,
-            severity="warning",
-        )
-    ]
 
 
 def generate_feedback(
     *,
     validation: ValidationResult,
     step_update: StepUpdate,
+    detection_state: str = "hand_detected",
 ) -> list[FeedbackItem]:
-    """
-    Explainable feedback:
-    - If constraints invalid: numeric adjustment derived from violations.
-    - Else if constraints valid but dwell not finished: "Hold ... for N more ms" (info).
-    - Else (step completed): "Step complete, moving to next_step".
+    """Generate explainable coaching feedback.
 
-    Returns list[FeedbackItem] for response compatibility.
+    Priorities:
+    1. If tracking is lost or partial, report tracking state.
+    2. If constraints are invalid, show ONE specific correction (the largest deviation).
+    3. If measurements are unavailable, prompt learner to place full hand in view.
+    4. If constraints are valid and dwell hold is active, show remaining hold duration.
+    5. If step completed, congratulate and announce next phase.
     """
+    if detection_state == "no_hand":
+        return [
+            FeedbackItem(
+                code="NO_HAND",
+                message="No hand detected. Position your hand inside the camera frame.",
+                severity="warning",
+            )
+        ]
+
+    if detection_state == "partial_or_unreliable":
+        return [
+            FeedbackItem(
+                code="PARTIAL_HAND",
+                message="Hand partially visible. Ensure all 5 fingers and wrist are in view.",
+                severity="warning",
+            )
+        ]
+
     if not validation.valid:
-        return _violation_feedback_items(violations=list(validation.violations or []))
+        if validation.violations:
+            # Violations are pre-sorted by deviation_amount in rules.py
+            primary = validation.violations[0]
+            return [_format_violation_feedback(primary)]
+
+        if validation.unavailable:
+            missing_labels = [
+                _METRIC_LABELS.get(k, k) for k in validation.unavailable[:2]
+            ]
+            return [
+                FeedbackItem(
+                    code="MEASUREMENT_UNAVAILABLE",
+                    message=f"Measurement unavailable for {', '.join(missing_labels)}. Keep hand steady in view.",
+                    severity="warning",
+                )
+            ]
+
+        return [
+            FeedbackItem(
+                code="CONSTRAINT_INVALID",
+                message="Adjust your hand position to match the target range.",
+                severity="warning",
+            )
+        ]
 
     if int(step_update.dwell_remaining_ms) > 0:
-        seconds_remaining = max(1, int((int(step_update.dwell_remaining_ms) + 999) / 1000))
+        sec = max(1, int((int(step_update.dwell_remaining_ms) + 999) / 1000))
         return [
             FeedbackItem(
                 code="DWELL_REMAINING",
-                message=f"Nice. Keep holding for about {seconds_remaining} more second(s).",
+                message=f"Pose in range! Hold steady for {sec} more second{'s' if sec > 1 else ''}.",
                 severity="info",
             )
         ]
@@ -69,7 +133,7 @@ def generate_feedback(
         return [
             FeedbackItem(
                 code="STEP_COMPLETE",
-                message="Great job. Step complete, moving to the next one.",
+                message="Great job! Step completed successfully.",
                 severity="info",
             )
         ]
@@ -77,7 +141,7 @@ def generate_feedback(
     return [
         FeedbackItem(
             code="OK",
-            message="Good form. Keep it steady.",
+            message="Optimal posture. Technique confirmed.",
             severity="info",
         )
     ]

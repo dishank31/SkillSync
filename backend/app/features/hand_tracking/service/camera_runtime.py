@@ -1,13 +1,29 @@
-﻿import threading
+"""
+Background camera runtime.
+
+Captures frames from a local webcam in a daemon thread and runs
+``HandTracker.process()`` to produce ``TrackingResult`` objects.
+
+The runtime is only used when the backend itself drives the camera
+(``auto_start_camera = True`` in settings).  The default flow is
+frontend-side detection via ``useCamera.ts``.
+"""
+
+from __future__ import annotations
+
+import threading
 import time
 from typing import Any, Optional
 
 from app.shared.utils.logger import get_logger
+from app.features.hand_tracking.cv.detection import DetectionState, TrackingResult
 
 logger = get_logger(__name__)
 
 
 class CameraRuntime:
+    """Threaded camera capture + hand detection loop."""
+
     def __init__(self, *, fps: int = 30, device_index: int = 0) -> None:
         self._fps = max(fps, 1)
         self._device_index = device_index
@@ -18,8 +34,18 @@ class CameraRuntime:
         self._stop_event = threading.Event()
         self._lock = threading.Lock()
         self._running = False
-        self._latest_landmarks: list[list[float]] = []
-        self._latest_timestamp_ms: int = 0
+
+        # Latest tracking result (thread-safe via _lock).
+        self._latest_result: TrackingResult = TrackingResult(
+            landmarks=[],
+            timestamp_ms=0,
+            detection_state=DetectionState.NO_HAND,
+            frame_is_observed=False,
+        )
+
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
 
     def _ensure_camera_deps(self) -> bool:
         if self._cv2 is not None and self._tracker is not None:
@@ -74,6 +100,12 @@ class CameraRuntime:
             self._capture.release()
             self._capture = None
 
+        if self._tracker is not None:
+            try:
+                self._tracker.close()
+            except Exception:
+                pass
+
         self._thread = None
         self._running = False
         logger.info("Camera runtime stopped")
@@ -81,13 +113,27 @@ class CameraRuntime:
     def is_running(self) -> bool:
         return self._running
 
-    def latest_landmarks(self) -> list[list[float]]:
+    # ------------------------------------------------------------------
+    # Accessors
+    # ------------------------------------------------------------------
+
+    def latest_result(self) -> TrackingResult:
+        """Thread-safe access to the most recent tracking result."""
         with self._lock:
-            return list(self._latest_landmarks)
+            return self._latest_result
+
+    def latest_landmarks(self) -> list[list[float]]:
+        """Backwards-compatible accessor for raw landmarks."""
+        with self._lock:
+            return list(self._latest_result.landmarks)
 
     def latest_timestamp_ms(self) -> int:
         with self._lock:
-            return self._latest_timestamp_ms
+            return self._latest_result.timestamp_ms
+
+    # ------------------------------------------------------------------
+    # Capture loop
+    # ------------------------------------------------------------------
 
     def _capture_loop(self) -> None:
         frame_interval = 1.0 / self._fps
@@ -99,16 +145,19 @@ class CameraRuntime:
 
             ok, frame = self._capture.read()
             if ok:
-                landmarks = self._tracker.process(frame)
+                result = self._tracker.process(frame)
                 with self._lock:
-                    self._latest_landmarks = landmarks
-                    self._latest_timestamp_ms = int(time.time() * 1000)
+                    self._latest_result = result
 
             elapsed = time.perf_counter() - start_time
             sleep_for = frame_interval - elapsed
             if sleep_for > 0:
                 time.sleep(sleep_for)
 
+
+# ------------------------------------------------------------------
+# Module-level singleton
+# ------------------------------------------------------------------
 
 _camera_runtime: Optional[CameraRuntime] = None
 

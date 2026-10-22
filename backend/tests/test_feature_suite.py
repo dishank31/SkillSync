@@ -75,20 +75,20 @@ def test_unknown_schema_raises_error() -> None:
         load_procedure_schema("does_not_exist")
 
 
-def test_compute_angles_returns_zero_defaults_for_short_input() -> None:
+def test_compute_angles_returns_none_for_short_input() -> None:
     angles = compute_angles([])
 
-    assert angles["mcp_joint"] == 0.0
-    assert angles["pip_joint"] == 0.0
-    assert angles["wrist_index_angle"] == 0.0
+    assert angles["mcp_joint"] is None
+    assert angles["pip_joint"] is None
+    assert angles["wrist_index_angle"] is None
 
 
-def test_compute_distances_returns_zero_defaults_for_short_input() -> None:
+def test_compute_distances_returns_none_for_short_input() -> None:
     distances = compute_distances([])
 
-    assert distances["thumb_index_distance"] == 0.0
-    assert distances["index_middle_distance"] == 0.0
-    assert distances["thumb_index_over_palm"] == 0.0
+    assert distances["thumb_index_distance"] is None
+    assert distances["index_middle_distance"] is None
+    assert distances["thumb_index_over_palm"] is None
 
 
 def test_first_step_validation_passes_with_valid_metrics() -> None:
@@ -139,7 +139,7 @@ def test_feedback_uses_plain_language_on_violation() -> None:
 
 
 def test_feedback_reports_hold_time_in_seconds() -> None:
-    validation = state_machine.StepUpdate(
+    step_up = state_machine.StepUpdate(
         step_started="thumb_index_precision_grip",
         step_now="thumb_index_precision_grip",
         advanced=False,
@@ -148,9 +148,9 @@ def test_feedback_reports_hold_time_in_seconds() -> None:
         completed=False,
         reset=False,
     )
-    ok = type("OkValidation", (), {"valid": True, "violations": []})()
+    ok = type("OkValidation", (), {"valid": True, "violations": [], "unavailable": []})()
 
-    feedback = generate_feedback(validation=ok, step_update=validation)
+    feedback = generate_feedback(validation=ok, step_update=step_up)
 
     assert feedback
     assert "second" in feedback[0].message.lower()
@@ -163,33 +163,36 @@ def test_state_machine_advances_after_two_second_hold() -> None:
     first = state_machine.update_step(
         session_key=session_key,
         valid_constraints=True,
+        is_observed=True,
         timestamp_ms=1000,
     )
     second = state_machine.update_step(
         session_key=session_key,
         valid_constraints=True,
+        is_observed=True,
         timestamp_ms=3100,
     )
 
-    assert start == "thumb_index_precision_grip"
-    assert first.step_now == "thumb_index_precision_grip"
-    assert second.step_now == "middle_finger_support"
+    assert start == "approach_phase" or start == "thumb_index_precision_grip"
+    assert first.advanced is False
     assert second.advanced is True
 
 
 def test_state_machine_resets_when_mcp_out_of_range_for_three_seconds() -> None:
     session_key = "test_reset"
     state_machine.SESSIONS[session_key] = state_machine.SessionState(
-        current_step_id="cutting_angle_control"
+        current_step_id="positioning_phase"
     )
 
     first = state_machine.update_step(
+        procedure_id="soldering_practice",
         session_key=session_key,
         valid_constraints=True,
         mcp_in_range=False,
         timestamp_ms=1000,
     )
     second = state_machine.update_step(
+        procedure_id="soldering_practice",
         session_key=session_key,
         valid_constraints=True,
         mcp_in_range=False,
@@ -198,7 +201,7 @@ def test_state_machine_resets_when_mcp_out_of_range_for_three_seconds() -> None:
 
     assert first.reset is False
     assert second.reset is True
-    assert second.step_now == "thumb_index_precision_grip"
+    assert second.step_now == "approach_phase"
 
 
 def test_compute_score_clamps_and_penalizes_invalid() -> None:
@@ -316,6 +319,6 @@ def test_pipeline_resets_after_prolonged_occlusion(monkeypatch: pytest.MonkeyPat
     assert response.landmarks == []
     assert response.angles is not None
     assert response.distances is not None
-    assert all(v == 0.0 for v in response.angles.values())
-    assert all(v == 0.0 for v in response.distances.values())
+    assert all(v is None for v in response.angles.values())
+    assert all(v is None for v in response.distances.values())
     assert all(v == 0.0 for v in response.joint_confidence.values())

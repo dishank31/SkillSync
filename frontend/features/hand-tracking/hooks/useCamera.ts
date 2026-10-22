@@ -1,12 +1,22 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { DetectionStateType } from "../../../shared/lib/types";
 
 type FacingMode = "user" | "environment";
 
 type CameraRequest = {
   deviceId: string | null;
   facingMode: FacingMode;
+};
+
+export type CameraDiagnostics = {
+  cameraOpen: boolean;
+  framesArriving: boolean;
+  modelLoaded: boolean;
+  detectorReady: boolean;
+  detectionState: DetectionStateType;
+  initError: string | null;
 };
 
 function sleep(ms: number) {
@@ -66,6 +76,15 @@ export function useCamera() {
   const [isSwitchingCamera, setIsSwitchingCamera] = useState(false);
   const [isLikelyMobile, setIsLikelyMobile] = useState(false);
 
+  const [diagnostics, setDiagnostics] = useState<CameraDiagnostics>({
+    cameraOpen: false,
+    framesArriving: false,
+    modelLoaded: false,
+    detectorReady: false,
+    detectionState: "no_hand",
+    initError: null,
+  });
+
   const refreshDevices = useCallback(async (preferredCameraId?: string | null) => {
     try {
       const cameras = await listVideoInputs();
@@ -116,18 +135,21 @@ export function useCamera() {
     let attachFrameId: number | null = null;
     let detectorClose: (() => void) | null = null;
 
+    let lastTimestampMs = 0;
+    let wasLost = false;
+
     const startLandmarkLoop = async (videoEl: HTMLVideoElement) => {
       try {
+        setDiagnostics((prev) => ({ ...prev, modelLoaded: false, initError: null }));
         const vision = await import("@mediapipe/tasks-vision");
-        if (stopped) {
-          return;
-        }
+        if (stopped) return;
+
         const fileset = await vision.FilesetResolver.forVisionTasks(
           "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.34/wasm",
         );
-        if (stopped) {
-          return;
-        }
+        if (stopped) return;
+
+        setDiagnostics((prev) => ({ ...prev, modelLoaded: true }));
 
         const detector = await vision.HandLandmarker.createFromOptions(fileset, {
           baseOptions: {
@@ -136,14 +158,16 @@ export function useCamera() {
           },
           runningMode: "VIDEO",
           numHands: 1,
-          minHandDetectionConfidence: 0.3,
-          minHandPresenceConfidence: 0.3,
-          minTrackingConfidence: 0.3,
+          minHandDetectionConfidence: 0.5,
+          minHandPresenceConfidence: 0.5,
+          minTrackingConfidence: 0.5,
         });
         if (stopped) {
           detector.close();
           return;
         }
+
+        setDiagnostics((prev) => ({ ...prev, detectorReady: true, initError: null }));
 
         const tick = () => {
           if (stopped) {
@@ -152,12 +176,40 @@ export function useCamera() {
           }
 
           if (videoEl.readyState >= 2) {
-            const result = detector.detectForVideo(videoEl, performance.now());
-            const landmarks = result.landmarks?.[0]?.map((point) => [point.x, point.y, point.z]) ?? [];
+            setDiagnostics((prev) => (prev.framesArriving ? prev : { ...prev, framesArriving: true }));
+
+            // MediaPipe Tasks VIDEO mode requires strictly increasing monotonic timestamps
+            const now = performance.now();
+            const ts = Math.max(now, lastTimestampMs + 1);
+            lastTimestampMs = ts;
+
+            const result = detector.detectForVideo(videoEl, ts);
+            const handList = result.landmarks?.[0];
+            const landmarks = handList?.map((point) => [point.x, point.y, point.z]) ?? [];
+
+            let state: DetectionStateType = "no_hand";
+            if (landmarks.length === 21) {
+              if (wasLost) {
+                state = "tracking_recovered";
+                wasLost = false;
+              } else {
+                state = "hand_detected";
+              }
+            } else {
+              wasLost = true;
+              state = "no_hand";
+            }
+
+            setDiagnostics((prev) => ({ ...prev, detectionState: state }));
 
             window.dispatchEvent(
               new CustomEvent("skillsync:landmarks", {
-                detail: { landmarks },
+                detail: {
+                  landmarks,
+                  detectionState: state,
+                  handedness: result.handedness?.[0]?.[0]?.categoryName ?? null,
+                  handednessConfidence: result.handedness?.[0]?.[0]?.score ?? null,
+                },
               }),
             );
           }
@@ -175,15 +227,19 @@ export function useCamera() {
         detectorClose = () => {
           try {
             detector.close();
-          } catch {
-            // ignore
-          }
+          } catch {}
         };
       } catch (error) {
         console.error("Hand landmarker init failed:", error);
+        const errMsg = error instanceof Error ? error.message : "MediaPipe HandLandmarker init failed";
+        setDiagnostics((prev) => ({
+          ...prev,
+          detectorReady: false,
+          initError: errMsg,
+        }));
         window.dispatchEvent(
           new CustomEvent("skillsync:landmarks", {
-            detail: { landmarks: [] },
+            detail: { landmarks: [], detectionState: "no_hand" },
           }),
         );
       }
@@ -192,6 +248,7 @@ export function useCamera() {
     const setup = async () => {
       try {
         setStreamReady(false);
+        setDiagnostics((prev) => ({ ...prev, cameraOpen: false, framesArriving: false }));
         stream = await getCameraStreamWithRetry(request);
 
         if (stopped) {
@@ -211,9 +268,7 @@ export function useCamera() {
         navigator.mediaDevices.addEventListener("devicechange", deviceChangeHandler);
 
         const attachStream = async () => {
-          if (stopped) {
-            return;
-          }
+          if (stopped) return;
 
           const videoEl = videoRef.current;
           if (!videoEl) {
@@ -230,6 +285,7 @@ export function useCamera() {
             if (!stopped) {
               setStreamReady(true);
               setIsSwitchingCamera(false);
+              setDiagnostics((prev) => ({ ...prev, cameraOpen: true }));
             }
           };
 
@@ -249,6 +305,11 @@ export function useCamera() {
         console.error("Camera access failed:", error);
         setStreamReady(false);
         setIsSwitchingCamera(false);
+        setDiagnostics((prev) => ({
+          ...prev,
+          cameraOpen: false,
+          initError: error instanceof Error ? error.message : "Camera access denied",
+        }));
       }
     };
 
@@ -256,18 +317,10 @@ export function useCamera() {
 
     return () => {
       stopped = true;
-      if (intervalId !== null) {
-        window.clearInterval(intervalId);
-      }
-      if (visibilityHandler) {
-        document.removeEventListener("visibilitychange", visibilityHandler);
-      }
-      if (deviceChangeHandler) {
-        navigator.mediaDevices.removeEventListener("devicechange", deviceChangeHandler);
-      }
-      if (attachFrameId !== null) {
-        window.cancelAnimationFrame(attachFrameId);
-      }
+      if (intervalId !== null) window.clearInterval(intervalId);
+      if (visibilityHandler) document.removeEventListener("visibilitychange", visibilityHandler);
+      if (deviceChangeHandler) navigator.mediaDevices.removeEventListener("devicechange", deviceChangeHandler);
+      if (attachFrameId !== null) window.cancelAnimationFrame(attachFrameId);
       detectorClose?.();
       detectorClose = null;
       const videoEl = videoRef.current;
@@ -286,5 +339,6 @@ export function useCamera() {
     canSwitchCamera: availableCameras.length > 1 || isLikelyMobile,
     switchCamera,
     isSwitchingCamera,
+    diagnostics,
   };
 }

@@ -1,8 +1,22 @@
+"""
+Rolling-window stability score.
+
+Computes jitter from *normalised*, same-unit features only (angles in
+degrees). Distances are excluded because they have a different scale
+and mixing them biases the score (Step 0, issue 8).
+
+The score is 0-1 where higher = more stable. It is NOT a fatigue
+metric — it measures hand steadiness only.
+"""
+
 from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
 from statistics import mean, pstdev
+from typing import Optional
+
+from app.core.config import get_config
 
 
 @dataclass(frozen=True)
@@ -12,27 +26,23 @@ class _Snapshot:
 
 
 class StabilityScorer:
-    """
-    Rolling-window stability score based on jitter in angles/distances over time.
-
-    This is intentionally feature-based (angles/distances), not raw coordinate jitter.
-    """
+    """Rolling-window stability score based on angle jitter."""
 
     def __init__(
         self,
         *,
-        window_size: int = 20,
-        min_samples: int = 6,
+        window_size: int | None = None,
+        min_samples: int | None = None,
+        cv_scale: float | None = None,
         idle_reset_ms: int = 5_000,
-        cv_scale: float = 0.15,
         eps: float = 1e-6,
     ) -> None:
-        self._window_size = int(window_size)
-        self._min_samples = int(min_samples)
-        self._idle_reset_ms = int(idle_reset_ms)
-        self._cv_scale = float(cv_scale)
+        cfg = get_config().scoring
+        self._window_size = window_size if window_size is not None else cfg.stability_window_size
+        self._min_samples = min_samples if min_samples is not None else cfg.stability_min_samples
+        self._cv_scale = cv_scale if cv_scale is not None else cfg.stability_cv_scale
         self._eps = float(eps)
-
+        self._idle_reset_ms = int(idle_reset_ms)
         self._feature_order: tuple[str, ...] | None = None
         self._history: deque[_Snapshot] = deque(maxlen=self._window_size)
 
@@ -42,48 +52,54 @@ class StabilityScorer:
 
     def update(
         self,
-        angles: dict[str, float],
-        distances: dict[str, float],
-        timestamp_ms: int,
+        angles: dict[str, Optional[float]],
+        distances: dict[str, Optional[float]] | None = None,
+        timestamp_ms: int = 0,
     ) -> float:
+        """Update with new frame data and return the stability score.
+
+        Only angles with actual float values are used; ``None`` angles
+        are skipped. Distances are excluded from jitter calculation to avoid
+        mixed-unit bias.
+        """
         if self._history:
             last_t = self._history[-1].timestamp_ms
             if timestamp_ms < last_t or (timestamp_ms - last_t) > self._idle_reset_ms:
                 self.reset()
 
+        valid_angles: dict[str, float] = {
+            k: float(v) for k, v in (angles or {}).items() if v is not None
+        }
+
+        if not valid_angles:
+            return 1.0
+
         if self._feature_order is None:
-            # Stable ordering to turn dicts into a consistent vector.
-            self._feature_order = tuple(sorted(angles.keys()) + sorted(distances.keys()))
+            self._feature_order = tuple(sorted(valid_angles.keys()))
 
         values: list[float] = []
         for k in self._feature_order:
-            if k in angles:
-                values.append(float(angles[k]))
-            elif k in distances:
-                values.append(float(distances[k]))
-            else:
-                values.append(0.0)
+            v = valid_angles.get(k)
+            if v is not None:
+                values.append(float(v))
 
-        self._history.append(_Snapshot(timestamp_ms=int(timestamp_ms), values=tuple(values)))
+        if not values:
+            return 1.0
+
+        self._history.append(
+            _Snapshot(timestamp_ms=int(timestamp_ms), values=tuple(values))
+        )
 
         if len(self._history) < max(2, self._min_samples):
             return 1.0
 
-        # Compute coefficient-of-variation (dimensionless) per feature over the window.
         by_dim = list(zip(*(s.values for s in self._history), strict=False))
         cvs: list[float] = []
         for series in by_dim:
             mu = mean(series)
             sigma = pstdev(series)
-            cvs.append(float(sigma) / (abs(float(mu)) + self._eps))
+            cvs.append(sigma / (abs(mu) + self._eps))
 
         jitter = mean(cvs) if cvs else 0.0
-
-        # Map jitter -> [0, 1]; higher jitter => lower stability.
-        stability = 1.0 / (1.0 + (float(jitter) / max(self._cv_scale, self._eps)))
-        if stability < 0.0:
-            return 0.0
-        if stability > 1.0:
-            return 1.0
-        return float(stability)
-
+        stability = 1.0 / (1.0 + jitter / max(self._cv_scale, self._eps))
+        return max(0.0, min(1.0, float(stability)))
