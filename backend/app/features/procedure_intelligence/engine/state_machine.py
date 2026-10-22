@@ -23,6 +23,7 @@ class SessionState:
     last_observed_valid_ms: int | None = None
     step_invalid_since_ms: int | None = None
     mcp_out_of_range_since_ms: int | None = None
+    step_entered_at_ms: int | None = None
     completed: bool = False
 
 

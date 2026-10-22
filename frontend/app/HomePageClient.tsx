@@ -102,7 +102,7 @@ export default function HomePage() {
   // Calibration state (Phase A)
   const [isCalibrated, setIsCalibrated] = useState(false);
   const [stableFrameCount, setStableFrameCount] = useState(0);
-  const REQUIRED_STABLE_FRAMES = 15;
+  const REQUIRED_STABLE_FRAMES = 5;
 
   const [decay, setDecay] = useState<DecayPrediction | null>(null);
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
@@ -158,15 +158,15 @@ export default function HomePage() {
       if (Array.isArray(points)) {
         landmarksRef.current = points;
 
-        // Calibration logic: check if hand is centered in guide box with 21 landmarks
+        // Calibration logic: check if hand is detected with landmarks
         if (!isCalibrated) {
-          if (points.length === 21) {
+          if (points.length >= 15) {
             const wrist = points[0];
-            const middleTip = points[12];
-            // Check bounding area roughly within central box (0.2 to 0.8 on x, y)
+            const middleTip = points[12] ?? points[points.length - 1];
+            // Relaxed bounding area check to allow natural camera positioning
             const isInsideBox =
-              wrist[0] > 0.15 && wrist[0] < 0.85 &&
-              middleTip[0] > 0.15 && middleTip[0] < 0.85;
+              (!wrist || (wrist[0] > 0.05 && wrist[0] < 0.95)) &&
+              (!middleTip || (middleTip[0] > 0.05 && middleTip[0] < 0.95));
 
             if (isInsideBox) {
               setStableFrameCount((c) => {
@@ -177,10 +177,10 @@ export default function HomePage() {
                 return next;
               });
             } else {
-              setStableFrameCount(0);
+              setStableFrameCount((c) => Math.max(0, c - 1));
             }
           } else {
-            setStableFrameCount(0);
+            setStableFrameCount((c) => Math.max(0, c - 1));
           }
         }
       }
@@ -500,24 +500,43 @@ export default function HomePage() {
                   <div className="calibration-card">
                     <h3 className="text-lg font-bold mb-2">Camera Calibration</h3>
                     <p className="text-xs text-slate-300 mb-4">
-                      Position your hand inside the central guide box. Keep your wrist, palm, and all
-                      5 fingers clearly visible with no extreme rotation.
+                      Position your hand inside the camera view. Keep your wrist, palm, and fingers visible to begin live tracking.
                     </p>
 
                     <div className="calibration-progress-bar">
                       <div
                         className="calibration-progress-fill"
                         style={{
-                          width: `${(stableFrameCount / REQUIRED_STABLE_FRAMES) * 100}%`,
+                          width: `${Math.min(100, (stableFrameCount / REQUIRED_STABLE_FRAMES) * 100)}%`,
                         }}
                       />
                     </div>
 
-                    <p className="text-xs text-emerald-400 font-semibold">
+                    <p className="text-xs text-emerald-400 font-semibold mb-4">
                       {stableFrameCount > 0
-                        ? `Calibrating: ${stableFrameCount}/${REQUIRED_STABLE_FRAMES} stable frames`
-                        : "Align hand inside guide box to begin"}
+                        ? `Calibrating: ${stableFrameCount}/${REQUIRED_STABLE_FRAMES} stable frames...`
+                        : "Align hand in view to auto-start, or click below:"}
                     </p>
+
+                    <button
+                      type="button"
+                      id="skip-calibration-btn"
+                      className="student-btn"
+                      style={{
+                        width: "100%",
+                        padding: "11px 18px",
+                        fontSize: "14px",
+                        fontWeight: 700,
+                        background: "linear-gradient(90deg, #10b981, #059669)",
+                        boxShadow: "0 4px 14px rgba(16, 185, 129, 0.4)",
+                        cursor: "pointer",
+                      }}
+                      onClick={() => {
+                        setIsCalibrated(true);
+                      }}
+                    >
+                      Start Practice Now (Skip Calibration)
+                    </button>
                   </div>
                 </div>
               )}

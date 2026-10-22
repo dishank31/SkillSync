@@ -94,8 +94,8 @@ PROCEDURES: dict[str, dict[str, Any]] = {
                 },
                 "constraints": {
                     "angles": {
-                        "wrist_index_angle": {"min": 40.0, "max": 70.0},
-                        "index_mcp_angle": {"min": 120.0, "max": 170.0},
+                        "wrist_index_angle": {"min": 40.0, "max": 75.0},
+                        "index_mcp_angle": {"min": 70.0, "max": 170.0},
                     },
                     "distances": {
                         "thumb_index_distance": {"min": 0.0, "max": 0.45},
@@ -136,9 +136,9 @@ PROCEDURES: dict[str, dict[str, Any]] = {
                 },
                 "constraints": {
                     "angles": {
-                        "wrist_index_angle": {"min": 35.0, "max": 55.0},
-                        "index_pip_angle": {"min": 90.0, "max": 135.0},
-                        "index_mcp_angle": {"min": 125.0, "max": 165.0},
+                        "wrist_index_angle": {"min": 35.0, "max": 65.0},
+                        "index_pip_angle": {"min": 90.0, "max": 145.0},
+                        "index_mcp_angle": {"min": 70.0, "max": 165.0},
                     },
                     "distances": {
                         "thumb_index_distance": {"min": 0.05, "max": 0.35},
@@ -259,13 +259,22 @@ PROCEDURES: dict[str, dict[str, Any]] = {
 DIFFICULTY_OVERRIDES: dict[str, dict[str, dict[str, dict[str, dict[str, float]]]]] = {
     "beginner": {
         "approach_phase": {
-            "angles": {"wrist_index_angle": {"min": 35.0, "max": 75.0}},
+            "angles": {
+                "wrist_index_angle": {"min": 30.0, "max": 90.0},
+                "index_mcp_angle": {"min": 65.0, "max": 175.0},
+            },
         },
         "positioning_phase": {
-            "angles": {"index_pip_angle": {"min": 75.0, "max": 150.0}},
+            "angles": {
+                "index_pip_angle": {"min": 75.0, "max": 150.0},
+                "wrist_index_angle": {"min": 30.0, "max": 85.0},
+            },
         },
         "hold_phase": {
-            "angles": {"wrist_index_angle": {"min": 30.0, "max": 60.0}},
+            "angles": {
+                "wrist_index_angle": {"min": 30.0, "max": 75.0},
+                "index_mcp_angle": {"min": 65.0, "max": 175.0},
+            },
         },
         "initial_incision_position": {
             "angles": {"wrist_index_angle": {"min": 60.0, "max": 120.0}},
