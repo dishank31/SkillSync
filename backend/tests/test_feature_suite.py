@@ -216,6 +216,63 @@ def test_state_machine_grants_transition_grace_period_on_step_advance() -> None:
     assert during_adjustment.step_now == "positioning_phase"
 
 
+def test_state_machine_debounces_transient_jitter_during_hold() -> None:
+    session_key = "test_debounce"
+
+    # Start hold at t=1000ms (beginner dwell time for approach_phase is 1500ms)
+    f1 = state_machine.update_step(
+        procedure_id="soldering_practice",
+        session_key=session_key,
+        valid_constraints=True,
+        is_observed=True,
+        timestamp_ms=1000,
+    )
+    assert f1.step_valid_since_ms == 1000
+
+    # Advance 700ms of valid hold at t=1700ms (remaining = 800ms)
+    f2 = state_machine.update_step(
+        procedure_id="soldering_practice",
+        session_key=session_key,
+        valid_constraints=True,
+        is_observed=True,
+        timestamp_ms=1700,
+    )
+    assert f2.dwell_remaining_ms == 800
+
+    # Brief tracking/metric jitter of 150ms at t=1850ms (below 450ms threshold)
+    f3 = state_machine.update_step(
+        procedure_id="soldering_practice",
+        session_key=session_key,
+        valid_constraints=False,
+        is_observed=True,
+        timestamp_ms=1850,
+    )
+    # Timer paused but NOT wiped to None
+    assert f3.step_valid_since_ms is not None
+    assert f3.dwell_remaining_ms == 800
+
+    # Pose recovered at t=1900ms (50ms after jitter started)
+    f4 = state_machine.update_step(
+        procedure_id="soldering_practice",
+        session_key=session_key,
+        valid_constraints=True,
+        is_observed=True,
+        timestamp_ms=1900,
+    )
+    assert f4.advanced is False
+
+    # Finishes remaining dwell at t=2800ms (total valid time = 700ms + 900ms = 1600ms >= 1500ms)
+    f5 = state_machine.update_step(
+        procedure_id="soldering_practice",
+        session_key=session_key,
+        valid_constraints=True,
+        is_observed=True,
+        timestamp_ms=2800,
+    )
+    assert f5.advanced is True
+    assert f5.step_now == "positioning_phase"
+
+
 def test_state_machine_resets_when_mcp_out_of_range_for_three_seconds() -> None:
     session_key = "test_reset"
     state_machine.SESSIONS[session_key] = state_machine.SessionState(

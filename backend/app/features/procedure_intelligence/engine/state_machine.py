@@ -144,17 +144,23 @@ def update_step(
         elif mcp_in_range is True:
             state.mcp_out_of_range_since_ms = None
 
-    # Tracking lost or estimated frames must NEVER advance the hold timer
+    # Tracking lost or invalid constraints:
     if not is_observed or not valid_constraints:
-        if not valid_constraints:
+        if state.step_invalid_since_ms is None:
+            state.step_invalid_since_ms = int(t_ms)
+
+        # Allow up to 450ms of transient sensor/tremor flicker before resetting hold progress
+        time_invalid = int(t_ms - state.step_invalid_since_ms)
+        if time_invalid >= 450:
             state.step_valid_since_ms = None
-            state.step_invalid_since_ms = None
 
         state.completed = state.current_step_id == "completed"
         dwell_ms = int(step_schema.dwell_time_ms)
         remaining = dwell_ms
         if state.step_valid_since_ms is not None:
-            elapsed = int(t_ms - state.step_valid_since_ms)
+            # During transient flicker, timer pauses at last observed valid point
+            last_valid = state.last_observed_valid_ms or state.step_valid_since_ms
+            elapsed = int(last_valid - state.step_valid_since_ms)
             remaining = max(0, dwell_ms - elapsed)
 
         return StepUpdate(
@@ -170,6 +176,11 @@ def update_step(
     # Frame is both valid AND observed
     if state.step_valid_since_ms is None:
         state.step_valid_since_ms = int(t_ms)
+    elif state.step_invalid_since_ms is not None:
+        # Recovered from a brief sensor flicker; offset start time so paused duration doesn't artificially count
+        flicker_duration = max(0, int(t_ms) - state.step_invalid_since_ms)
+        state.step_valid_since_ms += flicker_duration
+
     state.last_observed_valid_ms = int(t_ms)
     state.step_invalid_since_ms = None
 

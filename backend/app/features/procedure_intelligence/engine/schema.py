@@ -87,18 +87,18 @@ PROCEDURES: dict[str, dict[str, Any]] = {
                 "id": "approach_phase",
                 "name": "Approach Phase",
                 "description": "Enter work area with controlled iron angle.",
-                "method": "Hold iron in three-point pencil grip; angle tool toward joint (40°–65°).",
+                "method": "Hold iron in three-point pencil grip; angle tool toward joint (40°–130°).",
                 "feedback": {
                     "correct": "Good approach angle. Ready to position tip.",
                     "incorrect": "Adjust tool approach angle to enter the joint smoothly.",
                 },
                 "constraints": {
                     "angles": {
-                        "wrist_index_angle": {"min": 40.0, "max": 75.0},
-                        "index_mcp_angle": {"min": 70.0, "max": 170.0},
+                        "wrist_index_angle": {"min": 35.0, "max": 140.0},
+                        "index_mcp_angle": {"min": 65.0, "max": 175.0},
                     },
                     "distances": {
-                        "thumb_index_distance": {"min": 0.0, "max": 0.45},
+                        "thumb_index_distance": {"min": 0.0, "max": 0.50},
                     },
                 },
                 "dwell_time_ms": 2000,
@@ -115,11 +115,11 @@ PROCEDURES: dict[str, dict[str, Any]] = {
                 },
                 "constraints": {
                     "angles": {
-                        "index_pip_angle": {"min": 85.0, "max": 140.0},
-                        "wrist_index_angle": {"min": 35.0, "max": 60.0},
+                        "index_pip_angle": {"min": 75.0, "max": 155.0},
+                        "wrist_index_angle": {"min": 35.0, "max": 135.0},
                     },
                     "distances": {
-                        "thumb_index_distance": {"min": 0.05, "max": 0.40},
+                        "thumb_index_distance": {"min": 0.0, "max": 0.50},
                     },
                 },
                 "dwell_time_ms": 2500,
@@ -136,12 +136,12 @@ PROCEDURES: dict[str, dict[str, Any]] = {
                 },
                 "constraints": {
                     "angles": {
-                        "wrist_index_angle": {"min": 35.0, "max": 65.0},
-                        "index_pip_angle": {"min": 90.0, "max": 145.0},
-                        "index_mcp_angle": {"min": 70.0, "max": 165.0},
+                        "wrist_index_angle": {"min": 35.0, "max": 135.0},
+                        "index_pip_angle": {"min": 75.0, "max": 155.0},
+                        "index_mcp_angle": {"min": 65.0, "max": 175.0},
                     },
                     "distances": {
-                        "thumb_index_distance": {"min": 0.05, "max": 0.35},
+                        "thumb_index_distance": {"min": 0.0, "max": 0.50},
                     },
                 },
                 "dwell_time_ms": 3000,
@@ -256,24 +256,37 @@ PROCEDURES: dict[str, dict[str, Any]] = {
     },
 }
 
-DIFFICULTY_OVERRIDES: dict[str, dict[str, dict[str, dict[str, dict[str, float]]]]] = {
+DIFFICULTY_OVERRIDES: dict[str, dict[str, Any]] = {
     "beginner": {
         "approach_phase": {
+            "dwell_time_ms": 1500,
             "angles": {
-                "wrist_index_angle": {"min": 30.0, "max": 90.0},
-                "index_mcp_angle": {"min": 65.0, "max": 175.0},
+                "wrist_index_angle": {"min": 30.0, "max": 150.0},
+                "index_mcp_angle": {"min": 55.0, "max": 175.0},
+            },
+            "distances": {
+                "thumb_index_distance": {"min": 0.0, "max": 0.60},
             },
         },
         "positioning_phase": {
+            "dwell_time_ms": 1800,
             "angles": {
-                "index_pip_angle": {"min": 75.0, "max": 150.0},
-                "wrist_index_angle": {"min": 30.0, "max": 85.0},
+                "index_pip_angle": {"min": 65.0, "max": 165.0},
+                "wrist_index_angle": {"min": 30.0, "max": 145.0},
+            },
+            "distances": {
+                "thumb_index_distance": {"min": 0.0, "max": 0.60},
             },
         },
         "hold_phase": {
+            "dwell_time_ms": 2000,
             "angles": {
-                "wrist_index_angle": {"min": 30.0, "max": 75.0},
-                "index_mcp_angle": {"min": 65.0, "max": 175.0},
+                "wrist_index_angle": {"min": 30.0, "max": 145.0},
+                "index_pip_angle": {"min": 65.0, "max": 165.0},
+                "index_mcp_angle": {"min": 55.0, "max": 175.0},
+            },
+            "distances": {
+                "thumb_index_distance": {"min": 0.0, "max": 0.60},
             },
         },
         "initial_incision_position": {
@@ -302,8 +315,12 @@ def _apply_difficulty_overrides(
         step_overrides = overrides.get(step["id"])
         if not step_overrides:
             continue
+        if "dwell_time_ms" in step_overrides:
+            step["dwell_time_ms"] = step_overrides["dwell_time_ms"]
         constraints = step.setdefault("constraints", {})
         for category, entries in step_overrides.items():
+            if category == "dwell_time_ms":
+                continue
             cat_dict = constraints.setdefault(category, {})
             for key, values in entries.items():
                 cat_dict[key] = {**cat_dict.get(key, {}), **values}
