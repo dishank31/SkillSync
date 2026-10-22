@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import CameraFeed from "../features/hand-tracking/components/CameraFeed";
 import HandOverlay from "../features/hand-tracking/components/HandOverlay";
 import Metrics from "../features/realtime-feedback/components/Metrics";
+import TranslucentHandGuide from "../features/hand-tracking/components/TranslucentHandGuide";
 import { useTelemetry } from "../shared/contexts/TelemetryContext";
 import { API_URL_PREFIX } from "../shared/lib/constants";
 import type {
@@ -110,6 +111,17 @@ export default function HomePage() {
   const [decayFetchFailed, setDecayFetchFailed] = useState(false);
   const [activeSessionReport, setActiveSessionReport] = useState<SessionReport | null>(null);
   const prevStepRef = useRef<string | undefined>(undefined);
+  const [showGhost, setShowGhost] = useState(true);
+  const [showPid, setShowPid] = useState(true);
+  const [isSynced, setIsSynced] = useState(false);
+  const [syncProgress, setSyncProgress] = useState(0);
+  const [alignmentPercent, setAlignmentPercent] = useState(0);
+
+  const handleSyncUpdate = useCallback((data: { isSynced: boolean; syncProgress: number; alignmentPercent: number }) => {
+    setIsSynced(data.isSynced);
+    setSyncProgress(data.syncProgress);
+    setAlignmentPercent(data.alignmentPercent);
+  }, []);
 
   const loadUserDbData = useCallback(async (sid: string) => {
     if (!sid) return;
@@ -289,12 +301,23 @@ export default function HomePage() {
     completed: "Procedure completed successfully.",
   };
 
-  const procedureSteps = latest?.procedure_steps || [
-    { id: "approach_phase", dwell_time_ms: 2000 },
-    { id: "positioning_phase", dwell_time_ms: 2500 },
-    { id: "hold_phase", dwell_time_ms: 3000 },
-    { id: "completed", dwell_time_ms: 0 },
-  ];
+  const procedureSteps =
+    latest?.procedure_steps ||
+    (selectedProcedure === "surgical_knot_tying"
+      ? [
+          { id: "thumb_index_precision_grip", dwell_time_ms: 1000 },
+          { id: "middle_finger_support", dwell_time_ms: 1000 },
+          { id: "initial_incision_position", dwell_time_ms: 1000 },
+          { id: "cutting_angle_control", dwell_time_ms: 1000 },
+          { id: "grip_stability", dwell_time_ms: 1000 },
+          { id: "completed", dwell_time_ms: 0 },
+        ]
+      : [
+          { id: "approach_phase", dwell_time_ms: 2000 },
+          { id: "positioning_phase", dwell_time_ms: 2500 },
+          { id: "hold_phase", dwell_time_ms: 3000 },
+          { id: "completed", dwell_time_ms: 0 },
+        ]);
 
   const effectiveStepId = latest?.reset ? procedureSteps[0]?.id : latest?.step;
   const overlayVariant: OverlayVariant = latest?.valid ? "good" : latest?.landmarks?.length ? "warn" : "bad";
@@ -485,13 +508,25 @@ export default function HomePage() {
             <div className="hand-stage" aria-label="Live hand stage">
               <div className="stage-glow" />
               <CameraFeed compact />
-
-              {/* Hand Overlay with Calibration Box and Stale State */}
               <HandOverlay
+                stepId={effectiveStepId}
                 variant={overlayVariant}
                 isStale={isStale}
                 showCalibrationBox={!isCalibrated}
                 calibrationProgress={stableFrameCount / REQUIRED_STABLE_FRAMES}
+                showGhost={showGhost}
+                showPidLines={showPid}
+                onSyncUpdate={handleSyncUpdate}
+              />
+              <TranslucentHandGuide
+                stepId={effectiveStepId}
+                isSynced={isSynced || overlayVariant === "good"}
+                syncProgress={syncProgress}
+                alignmentPercent={alignmentPercent}
+                showGhost={showGhost}
+                showPid={showPid}
+                onToggleGhost={() => setShowGhost((prev) => !prev)}
+                onTogglePid={() => setShowPid((prev) => !prev)}
               />
 
               {/* Calibration Modal / Guide Overlay */}
@@ -550,10 +585,16 @@ export default function HomePage() {
               )}
 
               <div className="status-card status-card--stage">
-                <div className="status-icon">AI</div>
+                <div className="status-icon">{isSynced ? "✓" : "AI"}</div>
                 <div>
                   <p className="status-title">
-                    {isCalibrated ? "Soldering Technique Coach" : "Hand Calibration"}
+                    {!isCalibrated
+                      ? "Hand Calibration"
+                      : isSynced
+                      ? "Position Synced (Hold 1s)"
+                      : selectedProcedure === "soldering_practice"
+                      ? "Soldering Technique Coach"
+                      : "Scalpel Technique Coach"}
                   </p>
                   <p className="status-subtitle">{primaryFeedback}</p>
                 </div>

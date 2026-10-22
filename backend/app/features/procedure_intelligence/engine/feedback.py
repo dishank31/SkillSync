@@ -120,11 +120,11 @@ def generate_feedback(
         ]
 
     if int(step_update.dwell_remaining_ms) > 0:
-        sec = max(1, int((int(step_update.dwell_remaining_ms) + 999) / 1000))
+        rem_sec = round(max(0.1, int(step_update.dwell_remaining_ms) / 1000.0), 1)
         return [
             FeedbackItem(
                 code="DWELL_REMAINING",
-                message=f"Pose in range! Hold steady for {sec} more second{'s' if sec > 1 else ''}.",
+                message=f"Synced! Hold position steady for {rem_sec} second(s)...",
                 severity="info",
             )
         ]
@@ -133,7 +133,7 @@ def generate_feedback(
         return [
             FeedbackItem(
                 code="STEP_COMPLETE",
-                message="Great job! Step completed successfully.",
+                message="Synced! Step complete, moving to the next position.",
                 severity="info",
             )
         ]
