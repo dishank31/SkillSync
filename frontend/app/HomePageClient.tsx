@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import CameraFeed from "../features/hand-tracking/components/CameraFeed";
 import HandOverlay from "../features/hand-tracking/components/HandOverlay";
 import { useTelemetry } from "../shared/contexts/TelemetryContext";
+import { API_URL_PREFIX } from "../shared/lib/constants";
 import type { DecayPrediction, SessionRecord } from "../shared/lib/types";
 
 type LandmarksDetail = {
@@ -150,8 +151,8 @@ export default function HomePage() {
     setDecayFetchFailed(false);
     setDecayLoading(true);
     try {
-      const decayUrl = `http://localhost:8000/api/students/${encodeURIComponent(sid)}/decay`;
-      const sessionsUrl = `http://localhost:8000/api/students/${encodeURIComponent(sid)}/sessions`;
+      const decayUrl = `${API_URL_PREFIX}/api/students/${encodeURIComponent(sid)}/decay`;
+      const sessionsUrl = `${API_URL_PREFIX}/api/students/${encodeURIComponent(sid)}/sessions`;
       const [decayRes, sessionsRes] = await Promise.all([fetch(decayUrl), fetch(sessionsUrl)]);
       setDecay(decayRes.ok ? await decayRes.json() : null);
       setSessions(sessionsRes.ok ? await sessionsRes.json() : []);
@@ -172,7 +173,7 @@ export default function HomePage() {
     prevStepRef.current = undefined;
     setStudentConfirmed(true);
     try {
-      await fetch("http://localhost:8000/api/students", {
+      await fetch(`${API_URL_PREFIX}/api/students`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ student_id: sid }),
@@ -321,7 +322,7 @@ export default function HomePage() {
     setDecayFetchFailed(false);
     const sid = studentIdRef.current;
     if (!sid) return;
-    void fetch(`http://localhost:8000/api/students/${encodeURIComponent(sid)}/sessions`)
+    void fetch(`${API_URL_PREFIX}/api/students/${encodeURIComponent(sid)}/sessions`)
       .then((res) => (res.ok ? res.json() : []))
       .then((rows: SessionRecord[]) => setSessions(Array.isArray(rows) ? rows : []))
       .catch(() => {});
@@ -601,7 +602,7 @@ export default function HomePage() {
                   {decayLoading && analytics.latestSessions.length === 0 && !decay ? (
                     <p className="analytics-empty">Loading session history...</p>
                   ) : decayFetchFailed && !decay && !decayLoading ? (
-                    <p className="analytics-empty analytics-empty--error">Could not load analytics. Check that the API is running at <code>localhost:8000</code>.</p>
+                    <p className="analytics-empty analytics-empty--error">Could not load analytics. Check that the backend proxy is reachable from this device.</p>
                   ) : analytics.latestSessions.length > 0 ? (
                     <ul className="session-timeline" aria-label="Past sessions from database">
                       {analytics.latestSessions.map((session, index) => (

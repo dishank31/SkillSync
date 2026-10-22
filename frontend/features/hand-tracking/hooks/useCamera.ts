@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+
+type FacingMode = "user" | "environment";
+
+type CameraRequest = {
+  deviceId: string | null;
+  facingMode: FacingMode;
+};
 
 function sleep(ms: number) {
   return new Promise<void>((resolve) => {
@@ -8,13 +15,18 @@ function sleep(ms: number) {
   });
 }
 
-async function getCameraStreamWithRetry(maxAttempts = 4): Promise<MediaStream> {
+async function getCameraStreamWithRetry(request: CameraRequest, maxAttempts = 4): Promise<MediaStream> {
   let lastError: unknown;
+
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     try {
+      const primaryVideoConstraints = request.deviceId
+        ? { deviceId: { exact: request.deviceId } }
+        : { facingMode: { ideal: request.facingMode } };
+
       try {
         return await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "user" },
+          video: primaryVideoConstraints,
           audio: false,
         });
       } catch {
@@ -26,7 +38,6 @@ async function getCameraStreamWithRetry(maxAttempts = 4): Promise<MediaStream> {
     } catch (err) {
       lastError = err;
       const name = err instanceof DOMException ? err.name : "";
-      // Another tab, React Strict Mode double-mount, or OS still releasing the device.
       if (name === "NotReadableError" || name === "AbortError") {
         await sleep(250 * (attempt + 1));
         continue;
@@ -34,17 +45,73 @@ async function getCameraStreamWithRetry(maxAttempts = 4): Promise<MediaStream> {
       throw err;
     }
   }
+
   throw lastError instanceof Error ? lastError : new Error("Camera unavailable");
+}
+
+async function listVideoInputs() {
+  const devices = await navigator.mediaDevices.enumerateDevices();
+  return devices.filter((device) => device.kind === "videoinput");
 }
 
 export function useCamera() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [streamReady, setStreamReady] = useState(false);
+  const [availableCameras, setAvailableCameras] = useState<MediaDeviceInfo[]>([]);
+  const [activeCameraId, setActiveCameraId] = useState<string | null>(null);
+  const [request, setRequest] = useState<CameraRequest>({
+    deviceId: null,
+    facingMode: "user",
+  });
+  const [isSwitchingCamera, setIsSwitchingCamera] = useState(false);
+  const [isLikelyMobile, setIsLikelyMobile] = useState(false);
+
+  const refreshDevices = useCallback(async (preferredCameraId?: string | null) => {
+    try {
+      const cameras = await listVideoInputs();
+      setAvailableCameras(cameras);
+      if (preferredCameraId) {
+        setActiveCameraId(preferredCameraId);
+        return;
+      }
+      if (cameras.length > 0) {
+        setActiveCameraId((current) => current ?? cameras[0].deviceId);
+      }
+    } catch {
+      setAvailableCameras([]);
+    }
+  }, []);
+
+  const switchCamera = useCallback(() => {
+    setIsSwitchingCamera(true);
+    setRequest((current) => {
+      if (availableCameras.length > 1) {
+        const currentIndex = availableCameras.findIndex((camera) => camera.deviceId === activeCameraId);
+        const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % availableCameras.length : 0;
+        return {
+          deviceId: availableCameras[nextIndex]?.deviceId ?? null,
+          facingMode: current.facingMode,
+        };
+      }
+
+      return {
+        deviceId: null,
+        facingMode: current.facingMode === "user" ? "environment" : "user",
+      };
+    });
+  }, [activeCameraId, availableCameras]);
+
+  useEffect(() => {
+    setIsLikelyMobile(
+      /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || navigator.maxTouchPoints > 1,
+    );
+  }, []);
 
   useEffect(() => {
     let stream: MediaStream | null = null;
     let intervalId: number | null = null;
     let visibilityHandler: (() => void) | null = null;
+    let deviceChangeHandler: (() => void) | null = null;
     let stopped = false;
     let attachFrameId: number | null = null;
     let detectorClose: (() => void) | null = null;
@@ -55,8 +122,6 @@ export function useCamera() {
         if (stopped) {
           return;
         }
-        // Keep this version aligned with the installed npm package to avoid WASM/API mismatches.
-        // (Lockfile currently resolves @mediapipe/tasks-vision to 0.10.34.)
         const fileset = await vision.FilesetResolver.forVisionTasks(
           "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.34/wasm",
         );
@@ -88,8 +153,7 @@ export function useCamera() {
 
           if (videoEl.readyState >= 2) {
             const result = detector.detectForVideo(videoEl, performance.now());
-            const landmarks =
-              result.landmarks?.[0]?.map((point) => [point.x, point.y, point.z]) ?? [];
+            const landmarks = result.landmarks?.[0]?.map((point) => [point.x, point.y, point.z]) ?? [];
 
             window.dispatchEvent(
               new CustomEvent("skillsync:landmarks", {
@@ -99,8 +163,6 @@ export function useCamera() {
           }
         };
 
-        // requestAnimationFrame gets aggressively throttled/paused on background tabs.
-        // Use an interval so we recover quickly when the tab becomes visible again.
         tick();
         intervalId = window.setInterval(tick, 33);
 
@@ -118,7 +180,6 @@ export function useCamera() {
           }
         };
       } catch (error) {
-        // eslint-disable-next-line no-console
         console.error("Hand landmarker init failed:", error);
         window.dispatchEvent(
           new CustomEvent("skillsync:landmarks", {
@@ -130,14 +191,24 @@ export function useCamera() {
 
     const setup = async () => {
       try {
-        stream = await getCameraStreamWithRetry();
+        setStreamReady(false);
+        stream = await getCameraStreamWithRetry(request);
 
-        // If React Strict Mode unmounted before getUserMedia resolved, release immediately.
         if (stopped) {
           stream.getTracks().forEach((track) => track.stop());
           stream = null;
           return;
         }
+
+        const [videoTrack] = stream.getVideoTracks();
+        const settings = videoTrack?.getSettings();
+        const detectedCameraId = settings?.deviceId ?? request.deviceId;
+        await refreshDevices(detectedCameraId);
+
+        deviceChangeHandler = () => {
+          void refreshDevices(detectedCameraId ?? null);
+        };
+        navigator.mediaDevices.addEventListener("devicechange", deviceChangeHandler);
 
         const attachStream = async () => {
           if (stopped) {
@@ -158,6 +229,7 @@ export function useCamera() {
           const onLoadedData = () => {
             if (!stopped) {
               setStreamReady(true);
+              setIsSwitchingCamera(false);
             }
           };
 
@@ -165,7 +237,6 @@ export function useCamera() {
           try {
             await videoEl.play();
           } catch (playErr) {
-            // eslint-disable-next-line no-console
             console.warn("Video play() interrupted or blocked:", playErr);
           }
           if (!stopped) {
@@ -175,13 +246,13 @@ export function useCamera() {
 
         await attachStream();
       } catch (error) {
-        // eslint-disable-next-line no-console
         console.error("Camera access failed:", error);
         setStreamReady(false);
+        setIsSwitchingCamera(false);
       }
     };
 
-    setup();
+    void setup();
 
     return () => {
       stopped = true;
@@ -190,6 +261,9 @@ export function useCamera() {
       }
       if (visibilityHandler) {
         document.removeEventListener("visibilitychange", visibilityHandler);
+      }
+      if (deviceChangeHandler) {
+        navigator.mediaDevices.removeEventListener("devicechange", deviceChangeHandler);
       }
       if (attachFrameId !== null) {
         window.cancelAnimationFrame(attachFrameId);
@@ -204,7 +278,13 @@ export function useCamera() {
       stream?.getTracks().forEach((track) => track.stop());
       stream = null;
     };
-  }, []);
+  }, [refreshDevices, request]);
 
-  return { videoRef, streamReady };
+  return {
+    videoRef,
+    streamReady,
+    canSwitchCamera: availableCameras.length > 1 || isLikelyMobile,
+    switchCamera,
+    isSwitchingCamera,
+  };
 }
