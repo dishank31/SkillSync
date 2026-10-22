@@ -56,11 +56,11 @@ def generate_feedback(
         return _violation_feedback_items(violations=list(validation.violations or []))
 
     if int(step_update.dwell_remaining_ms) > 0:
-        seconds_remaining = max(1, int((int(step_update.dwell_remaining_ms) + 999) / 1000))
+        rem_sec = round(max(0.1, int(step_update.dwell_remaining_ms) / 1000.0), 1)
         return [
             FeedbackItem(
                 code="DWELL_REMAINING",
-                message=f"Nice. Keep holding for about {seconds_remaining} more second(s).",
+                message=f"Synced! Hold position steady for {rem_sec} second(s)...",
                 severity="info",
             )
         ]
@@ -69,7 +69,7 @@ def generate_feedback(
         return [
             FeedbackItem(
                 code="STEP_COMPLETE",
-                message="Great job. Step complete, moving to the next one.",
+                message="Synced! Step complete, moving to the next position.",
                 severity="info",
             )
         ]

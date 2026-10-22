@@ -1,8 +1,9 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import CameraFeed from "../features/hand-tracking/components/CameraFeed";
 import HandOverlay from "../features/hand-tracking/components/HandOverlay";
+import TranslucentHandGuide from "../features/hand-tracking/components/TranslucentHandGuide";
 import { useTelemetry } from "../shared/contexts/TelemetryContext";
 import { API_URL_PREFIX } from "../shared/lib/constants";
 import type { DecayPrediction, SessionRecord } from "../shared/lib/types";
@@ -143,8 +144,18 @@ export default function HomePage() {
   const [decay, setDecay] = useState<DecayPrediction | null>(null);
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
   const [decayLoading, setDecayLoading] = useState(false);
-  const [decayFetchFailed, setDecayFetchFailed] = useState(false);
   const prevStepRef = useRef<string | undefined>(undefined);
+  const [showGhost, setShowGhost] = useState(true);
+  const [showPid, setShowPid] = useState(true);
+  const [isSynced, setIsSynced] = useState(false);
+  const [syncProgress, setSyncProgress] = useState(0);
+  const [alignmentPercent, setAlignmentPercent] = useState(0);
+
+  const handleSyncUpdate = useCallback((data: { isSynced: boolean; syncProgress: number; alignmentPercent: number }) => {
+    setIsSynced(data.isSynced);
+    setSyncProgress(data.syncProgress);
+    setAlignmentPercent(data.alignmentPercent);
+  }, []);
 
   const loadUserDbData = useCallback(async (sid: string) => {
     if (!sid) return;
@@ -354,8 +365,11 @@ export default function HomePage() {
   };
 
   const procedureSteps = latest?.procedure_steps || [
-    { id: "grip_init", dwell_time_ms: 700 },
-    { id: "hold_steady", dwell_time_ms: 3000 },
+    { id: "thumb_index_precision_grip", dwell_time_ms: 1000 },
+    { id: "middle_finger_support", dwell_time_ms: 1000 },
+    { id: "initial_incision_position", dwell_time_ms: 1000 },
+    { id: "cutting_angle_control", dwell_time_ms: 1000 },
+    { id: "grip_stability", dwell_time_ms: 1000 },
     { id: "completed", dwell_time_ms: 0 },
   ];
   const effectiveStepId = latest?.reset ? procedureSteps[0]?.id : latest?.step;
@@ -460,12 +474,28 @@ export default function HomePage() {
             <div className="hand-stage" aria-label="Live hand stage">
               <div className="stage-glow" />
               <CameraFeed compact />
-              <HandOverlay variant={overlayVariant} />
+              <HandOverlay
+                stepId={effectiveStepId}
+                variant={overlayVariant}
+                showGhost={showGhost}
+                showPidLines={showPid}
+                onSyncUpdate={handleSyncUpdate}
+              />
+              <TranslucentHandGuide
+                stepId={effectiveStepId}
+                isSynced={isSynced || overlayVariant === "good"}
+                syncProgress={syncProgress}
+                alignmentPercent={alignmentPercent}
+                showGhost={showGhost}
+                showPid={showPid}
+                onToggleGhost={() => setShowGhost((prev) => !prev)}
+                onTogglePid={() => setShowPid((prev) => !prev)}
+              />
               {!connected && <div className="stage-empty">{reconnecting ? "Reconnecting to live scoring..." : "Waiting for backend websocket..."}</div>}
               <div className="status-card status-card--stage">
-                <div className="status-icon">A</div>
+                <div className="status-icon">{isSynced ? "✓" : "A"}</div>
                 <div>
-                  <p className="status-title">AI Calibration Active</p>
+                  <p className="status-title">{isSynced ? "Position Synced (Hold 1s)" : "AI Calibration Active"}</p>
                   <p className="status-subtitle">{primaryFeedback}</p>
                 </div>
                 <div className="status-bars" aria-hidden="true"><span /><span /><span /></div>

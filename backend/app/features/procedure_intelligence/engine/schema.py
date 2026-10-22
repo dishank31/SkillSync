@@ -87,7 +87,7 @@ PROCEDURES: dict[str, dict[str, Any]] = {
                 "constraints": {
                     "distances": {"thumb_index_over_palm": {"min": 0.0, "max": 0.35}},
                 },
-                "dwell_time_ms": 2000,
+                "dwell_time_ms": 1000,
                 "next_step": "middle_finger_support",
             },
             {
@@ -104,7 +104,7 @@ PROCEDURES: dict[str, dict[str, Any]] = {
                     "angles": {"index_middle_alignment": {"min": 0.0, "max": 75.0}},
                     "scalars": {"middle_below_index": {"min": 0.0, "max": 5.0}},
                 },
-                "dwell_time_ms": 2000,
+                "dwell_time_ms": 1000,
                 "next_step": "initial_incision_position",
             },
             {
@@ -120,7 +120,7 @@ PROCEDURES: dict[str, dict[str, Any]] = {
                     "angles": {"wrist_index_angle": {"min": 70.0, "max": 110.0}},
                 },
                 # NOTE: intermediate values used as base; beginner overrides applied at load time.
-                "dwell_time_ms": 2000,
+                "dwell_time_ms": 1000,
                 "next_step": "cutting_angle_control",
             },
             {
@@ -135,7 +135,7 @@ PROCEDURES: dict[str, dict[str, Any]] = {
                 "constraints": {
                     "angles": {"wrist_index_angle": {"min": 30.0, "max": 45.0}},
                 },
-                "dwell_time_ms": 2000,
+                "dwell_time_ms": 1000,
                 "next_step": "grip_stability",
             },
             {
@@ -155,7 +155,7 @@ PROCEDURES: dict[str, dict[str, Any]] = {
                     },
                     "scalars": {"middle_below_index": {"min": 0.0, "max": 5.0}},
                 },
-                "dwell_time_ms": 2000,
+                "dwell_time_ms": 1000,
                 "next_step": "completed",
             },
             {
