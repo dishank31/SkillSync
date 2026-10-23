@@ -238,6 +238,10 @@ def process_frame(
         # Expected ergonomic working posture for index MCP (aligned with schema min 65-70)
         mcp_in_range = 65.0 <= float(mcp_val) <= 175.0
 
+    cmd = getattr(request, "command", None)
+    if cmd in ("reset", "restart", "start"):
+        reset_session(procedure_id=request.procedure_id, session_key=session_id)
+
     # 7. State Machine update (timer ONLY advances if is_observed is True and constraints valid)
     step_update = update_step(
         valid_constraints=validation.valid if is_observed else False,
@@ -294,7 +298,7 @@ def process_frame(
     session_report: dict[str, Any] | None = None
     skill_decay: DecaySummary | None = None
 
-    if step_update.step_now == "completed" and step_update.advanced:
+    if (step_update.step_now == "completed" and step_update.advanced) or cmd == "stop":
         session_report = aggregator.complete_session(timestamp_ms=request.timestamp_ms)
         if session_report is not None:
             session_saved = True

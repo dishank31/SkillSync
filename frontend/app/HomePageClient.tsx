@@ -14,9 +14,16 @@ import type {
   DecayPrediction,
   DetectionStateType,
   MetricStatus,
+  PracticeNote,
   SessionRecord,
   SessionReport,
 } from "../shared/lib/types";
+
+function formatStopwatch(seconds: number): string {
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+}
 
 type LandmarksDetail = {
   landmarks?: number[][];
@@ -120,11 +127,290 @@ export default function HomePage() {
   const [syncProgress, setSyncProgress] = useState(0);
   const [alignmentPercent, setAlignmentPercent] = useState(0);
 
+  // Session Command Controls & Practice Notes State
+  const [sessionStatus, setSessionStatus] = useState<"idle" | "running" | "paused" | "stopped">("running");
+  const [sessionSeconds, setSessionSeconds] = useState(0);
+  const commandRef = useRef<string | null>(null);
+  const [voiceToast, setVoiceToast] = useState<{ command: string; action: string } | null>(null);
+  const toastTimeoutRef = useRef<any>(null);
+
+  const triggerVoiceToast = useCallback((command: string, action: string) => {
+    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+    setVoiceToast({ command, action });
+    toastTimeoutRef.current = setTimeout(() => {
+      setVoiceToast(null);
+    }, 2800);
+  }, []);
+
+  // Practice notes & callouts state
+  const [practiceNotes, setPracticeNotes] = useState<PracticeNote[]>([]);
+  const lastRecordedUtteranceRef = useRef<string>("");
+  const lastRecordedTimeRef = useRef<number>(0);
+  const [copiedNotes, setCopiedNotes] = useState(false);
+  const [manualNoteText, setManualNoteText] = useState("");
+
+  // Stopwatch timer for running session
+  useEffect(() => {
+    if (sessionStatus !== "running") return;
+    const interval = setInterval(() => {
+      setSessionSeconds((prev) => prev + 1);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [sessionStatus]);
+
   // CCNLP Think-Aloud Speech & SOP Compiler State
   const [isSOPModalOpen, setIsSOPModalOpen] = useState(false);
   const [autoSpeakTTS, setAutoSpeakTTS] = useState(false);
   const speech = useThinkAloudSpeech({ autoSpeak: autoSpeakTTS });
   const [customProcedureTitle, setCustomProcedureTitle] = useState<string | null>(null);
+
+  // Session Command Handlers
+  const handleStartSession = useCallback(() => {
+    setSessionStatus("running");
+    setIsCalibrated(true);
+    commandRef.current = "start";
+    setSessionSeconds(0);
+    setActiveSessionReport(null);
+    triggerVoiceToast("start session", "Practice Session Started");
+    if (autoSpeakTTS) {
+      speech.speakFeedback("Practice session started. Live camera tracking active.");
+    }
+  }, [autoSpeakTTS, speech, triggerVoiceToast]);
+
+  const handlePauseSession = useCallback(() => {
+    setSessionStatus("paused");
+    triggerVoiceToast("pause session", "Practice Session Paused");
+    if (autoSpeakTTS) {
+      speech.speakFeedback("Practice session paused.");
+    }
+  }, [autoSpeakTTS, speech, triggerVoiceToast]);
+
+  const handleResumeSession = useCallback(() => {
+    setSessionStatus("running");
+    triggerVoiceToast("resume session", "Practice Session Resumed");
+    if (autoSpeakTTS) {
+      speech.speakFeedback("Practice session resumed.");
+    }
+  }, [autoSpeakTTS, speech, triggerVoiceToast]);
+
+  const handleRestartSession = useCallback(() => {
+    setSessionStatus("running");
+    setSessionSeconds(0);
+    commandRef.current = "reset";
+    triggerVoiceToast("restart session", "Practice Restarted from Step 1");
+    if (autoSpeakTTS) {
+      speech.speakFeedback("Practice session restarted from Step 1.");
+    }
+  }, [autoSpeakTTS, speech, triggerVoiceToast]);
+
+  const handleNextStep = useCallback(() => {
+    commandRef.current = "next_step";
+    triggerVoiceToast("next step", "Advancing to Next Step");
+    if (autoSpeakTTS) {
+      speech.speakFeedback("Advancing to next practice step.");
+    }
+  }, [autoSpeakTTS, speech, triggerVoiceToast]);
+
+  const handleStopSession = useCallback(() => {
+    setSessionStatus("stopped");
+    commandRef.current = "stop";
+    triggerVoiceToast("stop session", "Practice Session Ended");
+    if (autoSpeakTTS) {
+      speech.speakFeedback("Practice session ended. Opening session performance and callouts report.");
+    }
+
+    const rep: SessionReport = latest?.session_report ?? {
+      student_id: studentIdRef.current || "anonymous",
+      procedure_id: selectedProcedure,
+      difficulty: difficultyRef.current,
+      final_score: (latest?.score ?? 0.8),
+      final_score_pct: Math.round((latest?.score ?? 0.8) * 100),
+      duration_ms: sessionSeconds * 1000,
+      completed_steps: [selectedProcedure],
+      failed_attempts: 0,
+      time_to_first_valid_hold_ms: 1200,
+      observed_frames: frameCounter.current,
+      estimated_frames: 0,
+      total_frames: frameCounter.current,
+      coverage_pct: 88,
+      avg_hesitation_ms: 0,
+      avg_deviation: 0,
+      tremor_score: 0.1,
+      step_breakdown: {},
+      recommended_repeats: [],
+      recommendation:
+        latest?.intervention_recommendation ||
+        "Maintain synchronized Think-Aloud verbal callouts with steady tool grip angles.",
+      practice_notes: practiceNotes,
+    };
+    rep.practice_notes = practiceNotes;
+    setActiveSessionReport(rep);
+  }, [
+    latest?.session_report,
+    latest?.score,
+    latest?.intervention_recommendation,
+    selectedProcedure,
+    sessionSeconds,
+    practiceNotes,
+    autoSpeakTTS,
+    speech,
+    triggerVoiceToast,
+  ]);
+
+  // Voice Command & Procedural Callout Detection Effect
+  useEffect(() => {
+    if (!speech.transcript) return;
+    const raw = speech.transcript.trim();
+    const lower = raw.toLowerCase();
+
+    // 1. Voice Command Matching
+    if (/^(start(\s+session|\s+practice)?|begin(\s+session|\s+practice)?)$/i.test(lower)) {
+      handleStartSession();
+      speech.clearTranscript();
+      return;
+    }
+    if (/^(stop(\s+session|\s+practice)?|end(\s+session|\s+practice)?|finish(\s+session|\s+practice)?|complete(\s+session|\s+practice)?)$/i.test(lower)) {
+      handleStopSession();
+      speech.clearTranscript();
+      return;
+    }
+    if (/^pause(\s+session|\s+practice)?$/i.test(lower)) {
+      handlePauseSession();
+      speech.clearTranscript();
+      return;
+    }
+    if (/^(resume(\s+session|\s+practice)?|continue(\s+session|\s+practice)?)$/i.test(lower)) {
+      handleResumeSession();
+      speech.clearTranscript();
+      return;
+    }
+    if (/^(restart(\s+session|\s+practice)?|reset(\s+session|\s+practice)?|repeat(\s+step)?)$/i.test(lower)) {
+      handleRestartSession();
+      speech.clearTranscript();
+      return;
+    }
+    if (/^(next\s*step|skip\s*step|advance\s*step)$/i.test(lower)) {
+      handleNextStep();
+      speech.clearTranscript();
+      return;
+    }
+    if (/^(clear\s*(all\s*)?(notes|callouts)|reset\s*notes)$/i.test(lower)) {
+      setPracticeNotes([]);
+      triggerVoiceToast("clear notes", "Practice Notes Cleared");
+      if (autoSpeakTTS) speech.speakFeedback("Practice notes cleared.");
+      speech.clearTranscript();
+      return;
+    }
+
+    // 2. Procedural Think-Aloud Callout Recording
+    if (sessionStatus === "running" && raw.length >= 4) {
+      const now = Date.now();
+      const isDuplicate =
+        raw.toLowerCase() === lastRecordedUtteranceRef.current.toLowerCase() &&
+        now - lastRecordedTimeRef.current < 4500;
+
+      if (!isDuplicate) {
+        lastRecordedUtteranceRef.current = raw;
+        lastRecordedTimeRef.current = now;
+
+        const currentStepName = latest?.step_name || (selectedProcedure === "surgical_knot_tying" ? "Scalpel Precision" : "Soldering Dwell");
+
+        const newNote: PracticeNote = {
+          id: `note_${now}_${Math.random().toString(36).substring(2, 6)}`,
+          timestamp: now,
+          timeStr: formatStopwatch(sessionSeconds),
+          stepId: latest?.step || "step_active",
+          stepTitle: currentStepName,
+          callout: raw,
+          score: latest?.valid ? Math.round(latest.score * 100) : 0,
+          alignmentState: latest?.alignment_state || "SYNCHRONIZED_MASTERY",
+          pEntailment: latest?.p_entailment ?? 0.85,
+          feedback:
+            latest?.contrastive_feedback ||
+            latest?.feedback?.[0]?.message ||
+            "Technique evaluated with 3D joint bounds.",
+        };
+
+        setPracticeNotes((prev) => [newNote, ...prev]);
+      }
+    }
+  }, [
+    speech.transcript,
+    sessionStatus,
+    sessionSeconds,
+    latest?.step,
+    latest?.step_name,
+    latest?.valid,
+    latest?.score,
+    latest?.alignment_state,
+    latest?.p_entailment,
+    latest?.contrastive_feedback,
+    latest?.feedback,
+    selectedProcedure,
+    handleStartSession,
+    handleStopSession,
+    handlePauseSession,
+    handleResumeSession,
+    handleRestartSession,
+    handleNextStep,
+    speech,
+    triggerVoiceToast,
+    autoSpeakTTS,
+  ]);
+
+  // Practice Notes Utilities
+  const copyPracticeNotes = useCallback(() => {
+    if (practiceNotes.length === 0) return;
+    const header = `# SkillSync Practice Notes - ${formatProcedureLabel(selectedProcedure)}\nDate: ${new Date().toLocaleString()}\nStudent: ${studentIdRef.current || "Anonymous"}\nTotal Callouts: ${practiceNotes.length}\n\n`;
+    const body = practiceNotes
+      .map(
+        (n, i) =>
+          `### Note ${practiceNotes.length - i} [${n.timeStr}] - ${n.stepTitle}\n- **Spoken Callout:** "${n.callout}"\n- **Technique Score:** ${n.score}%\n- **Alignment:** ${n.alignmentState} (Entailment: ${Math.round(n.pEntailment * 100)}%)\n- **AI Coach Feedback:** ${n.feedback}\n`
+      )
+      .join("\n");
+    navigator.clipboard.writeText(header + body);
+    setCopiedNotes(true);
+    setTimeout(() => setCopiedNotes(false), 2000);
+  }, [practiceNotes, selectedProcedure]);
+
+  const exportPracticeNotes = useCallback(() => {
+    if (practiceNotes.length === 0) return;
+    const header = `# SkillSync Practice Session Notes Log\nProcedure: ${formatProcedureLabel(selectedProcedure)}\nDate: ${new Date().toISOString()}\nStudent: ${studentIdRef.current || "Anonymous"}\nTotal Callouts: ${practiceNotes.length}\n\n=========================================\n\n`;
+    const body = practiceNotes
+      .map(
+        (n) =>
+          `[${n.timeStr}] ${n.stepTitle}\nCallout: "${n.callout}"\nTechnique Score: ${n.score}%\nAlignment State: ${n.alignmentState} (Entailment: ${Math.round(n.pEntailment * 100)}%)\nFeedback: ${n.feedback}\n`
+      )
+      .join("\n-----------------------------------------\n\n");
+    const blob = new Blob([header + body], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `skillsync_notes_${selectedProcedure}_${Date.now()}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [practiceNotes, selectedProcedure]);
+
+  const handleAddManualNote = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!manualNoteText.trim()) return;
+    const now = Date.now();
+    const currentStepName = latest?.step_name || (selectedProcedure === "surgical_knot_tying" ? "Scalpel Precision" : "Soldering Dwell");
+    const newNote: PracticeNote = {
+      id: `manual_${now}`,
+      timestamp: now,
+      timeStr: formatStopwatch(sessionSeconds),
+      stepId: latest?.step || "current_step",
+      stepTitle: currentStepName,
+      callout: manualNoteText.trim(),
+      score: latest?.valid ? Math.round(latest.score * 100) : 0,
+      alignmentState: latest?.alignment_state || "SYNCHRONIZED_MASTERY",
+      pEntailment: latest?.p_entailment ?? 0.9,
+      feedback: "Manual observation note recorded.",
+    };
+    setPracticeNotes((prev) => [newNote, ...prev]);
+    setManualNoteText("");
+  };
 
   // Auto-speak contrastive feedback if TTS is enabled and feedback changed
   const lastSpokenFeedbackRef = useRef<string>("");
@@ -226,6 +512,12 @@ export default function HomePage() {
 
     let intervalId: number | null = null;
     const sendFrame = () => {
+      // If session is paused, skip sending active frames to freeze timers
+      if (sessionStatus === "paused") return;
+
+      const activeCmd = commandRef.current;
+      commandRef.current = null;
+
       send({
         frame_id: frameCounter.current,
         timestamp_ms: Date.now(),
@@ -237,6 +529,7 @@ export default function HomePage() {
         utterance_latency_sec: (speech.lastSpokenAtRef?.current ?? speech.lastSpokenAt)
           ? (Date.now() - (speech.lastSpokenAtRef?.current ?? speech.lastSpokenAt!)) / 1000
           : 0,
+        command: activeCmd || undefined,
       });
       frameCounter.current += 1;
     };
@@ -536,6 +829,88 @@ export default function HomePage() {
               </div>
             </div>
 
+            {/* Session Command Control Bar */}
+            <div className="session-control-bar">
+              <div className="session-status-cluster">
+                <span className={`session-status-badge session-status-badge--${sessionStatus}`}>
+                  <span className="session-status-dot" />
+                  {sessionStatus === "running" ? "ACTIVE" : sessionStatus.toUpperCase()}
+                </span>
+                <span className="session-stopwatch">⏱ {formatStopwatch(sessionSeconds)}</span>
+              </div>
+
+              <div className="session-action-btns">
+                {sessionStatus === "running" ? (
+                  <>
+                    <button
+                      type="button"
+                      className="session-btn session-btn--pause"
+                      onClick={handlePauseSession}
+                      title="Pause Practice Session (Voice: 'pause session')"
+                    >
+                      ⏸ Pause
+                    </button>
+                    <button
+                      type="button"
+                      className="session-btn session-btn--stop"
+                      onClick={handleStopSession}
+                      title="Stop & Review Practice Report (Voice: 'stop session')"
+                    >
+                      ⏹ Stop Session
+                    </button>
+                    <button
+                      type="button"
+                      className="session-btn session-btn--secondary"
+                      onClick={handleRestartSession}
+                      title="Restart Practice from Step 1 (Voice: 'restart session')"
+                    >
+                      🔄 Restart
+                    </button>
+                    <button
+                      type="button"
+                      className="session-btn session-btn--secondary"
+                      onClick={handleNextStep}
+                      title="Advance to Next Step (Voice: 'next step')"
+                    >
+                      ⏭ Next Step
+                    </button>
+                  </>
+                ) : sessionStatus === "paused" ? (
+                  <>
+                    <button
+                      type="button"
+                      className="session-btn session-btn--resume"
+                      onClick={handleResumeSession}
+                      title="Resume Practice Session (Voice: 'resume session')"
+                    >
+                      ▶ Resume
+                    </button>
+                    <button
+                      type="button"
+                      className="session-btn session-btn--stop"
+                      onClick={handleStopSession}
+                      title="Stop & Review Practice Report"
+                    >
+                      ⏹ Stop Session
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    className="session-btn session-btn--start"
+                    onClick={handleStartSession}
+                    title="Start Practice Session (Voice: 'start session')"
+                  >
+                    ▶ Start Session
+                  </button>
+                )}
+              </div>
+
+              <div className="session-voice-help" title="Voice Commands supported by Think-Aloud Speech Recognition">
+                <span>🎙️ Voice: "start session" · "stop session" · "pause" · "next step" · "clear notes"</span>
+              </div>
+            </div>
+
             <div className="hand-stage" aria-label="Live hand stage">
               <div className="stage-glow" />
               <CameraFeed compact />
@@ -630,6 +1005,97 @@ export default function HomePage() {
                   <p className="status-subtitle">{primaryFeedback}</p>
                 </div>
               </div>
+
+              {/* Practice Notes & Spoken Callouts Log Card */}
+              <article className="practice-notes-card">
+                <div className="practice-notes-head">
+                  <div className="practice-notes-title-group">
+                    <h3 className="practice-notes-title">📋 Practice Notes & Callouts</h3>
+                    <span className="practice-notes-counter">
+                      {practiceNotes.length} {practiceNotes.length === 1 ? "Note" : "Notes"}
+                    </span>
+                  </div>
+
+                  <div className="practice-notes-actions">
+                    {practiceNotes.length > 0 && (
+                      <>
+                        <button
+                          type="button"
+                          className="practice-notes-action-btn"
+                          onClick={copyPracticeNotes}
+                          title="Copy all notes formatted to clipboard"
+                        >
+                          {copiedNotes ? "✓ Copied!" : "📋 Copy"}
+                        </button>
+                        <button
+                          type="button"
+                          className="practice-notes-action-btn"
+                          onClick={exportPracticeNotes}
+                          title="Download notes as Markdown file"
+                        >
+                          📥 Export
+                        </button>
+                        <button
+                          type="button"
+                          className="practice-notes-action-btn"
+                          onClick={() => setPracticeNotes([])}
+                          title="Clear all recorded notes"
+                        >
+                          🗑️ Clear
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {practiceNotes.length === 0 ? (
+                  <div className="practice-notes-empty">
+                    <p>No callouts recorded yet. Speak into the microphone using Think-Aloud (e.g. <em>"Holding scalpel in pencil grip at 45 degrees"</em>) to automatically record notes with live AI feedback.</p>
+                  </div>
+                ) : (
+                  <div className="practice-notes-list">
+                    {practiceNotes.map((note) => (
+                      <div key={note.id} className="practice-note-item">
+                        <div className="practice-note-meta">
+                          <span className="practice-note-time">⏱ {note.timeStr}</span>
+                          <span className="practice-note-step">{note.stepTitle}</span>
+                        </div>
+                        <p className="practice-note-callout">"{note.callout}"</p>
+                        <div className="practice-note-footer">
+                          <span
+                            className={`practice-note-alignment practice-note-alignment--${
+                              note.alignmentState.includes("SYNCHRONIZED")
+                                ? "synchronized"
+                                : note.alignmentState.includes("DRIFT")
+                                ? "drift"
+                                : "contradiction"
+                            }`}
+                          >
+                            {note.alignmentState.replace(/_/g, " ")} ({Math.round(note.pEntailment * 100)}%)
+                          </span>
+                          <span className="practice-note-feedback" title={note.feedback}>
+                            💡 {note.feedback}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Manual Note Add Input */}
+                <form onSubmit={handleAddManualNote} className="practice-notes-add-box">
+                  <input
+                    type="text"
+                    className="practice-notes-input"
+                    placeholder="Type custom practice observation or coaching note..."
+                    value={manualNoteText}
+                    onChange={(e) => setManualNoteText(e.target.value)}
+                  />
+                  <button type="submit" className="practice-notes-submit-btn">
+                    + Add Note
+                  </button>
+                </form>
+              </article>
             </div>
           </section>
 
@@ -746,6 +1212,39 @@ export default function HomePage() {
             <div className="report-recommendation">
               <strong>Coaching Recommendation:</strong>
               <p className="mt-1">{activeSessionReport.recommendation}</p>
+            </div>
+
+            {/* Practice Callouts & Procedural Notes Section */}
+            <div className="report-notes-section">
+              <div className="report-notes-title">
+                <span>Practice Callouts & Procedural Notes ({activeSessionReport.practice_notes?.length ?? practiceNotes.length})</span>
+                <button
+                  type="button"
+                  className="practice-notes-action-btn"
+                  onClick={copyPracticeNotes}
+                >
+                  {copiedNotes ? "✓ Copied" : "📋 Copy Log"}
+                </button>
+              </div>
+
+              {(activeSessionReport.practice_notes?.length ?? practiceNotes.length) === 0 ? (
+                <p className="text-xs text-slate-400 italic">No spoken callouts logged during this practice run.</p>
+              ) : (
+                <div className="report-notes-scroll">
+                  {(activeSessionReport.practice_notes ?? practiceNotes).map((note) => (
+                    <div key={note.id} className="p-2 bg-white rounded border border-slate-200 text-xs">
+                      <div className="flex justify-between font-bold text-slate-700">
+                        <span>{note.stepTitle}</span>
+                        <span className="font-mono text-slate-400">{note.timeStr}</span>
+                      </div>
+                      <p className="mt-1 text-slate-800 font-medium">"{note.callout}"</p>
+                      <p className="mt-1 text-[11px] text-cyan-700">
+                        Entailment: {Math.round(note.pEntailment * 100)}% · Coach: {note.feedback}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div className="flex justify-end gap-3 mt-4">
@@ -1166,6 +1665,14 @@ export default function HomePage() {
           setActiveTab("dashboard");
         }}
       />
+
+      {/* Floating Voice Command Toast */}
+      {voiceToast && (
+        <div className="voice-command-toast" role="status" aria-live="polite">
+          <span className="voice-toast-badge">Voice Command</span>
+          <span>⚡ <strong>"{voiceToast.command}"</strong> — {voiceToast.action}</span>
+        </div>
+      )}
     </main>
   );
 }

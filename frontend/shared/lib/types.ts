@@ -69,6 +69,21 @@ export type SessionReport = {
   }>;
   recommended_repeats: string[];
   recommendation: string;
+  practice_notes?: PracticeNote[];
+};
+
+export type PracticeNote = {
+  id: string;
+  timestamp: number;
+  timeStr: string;
+  stepId: string;
+  stepTitle: string;
+  callout: string;
+  score: number;
+  alignmentState: string;
+  pEntailment: number;
+  feedback: string;
+  isVoiceCommand?: boolean;
 };
 
 export type DetectionStateType = "no_hand" | "hand_detected" | "partial_or_unreliable" | "tracking_recovered";

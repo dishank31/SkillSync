@@ -27,6 +27,7 @@ class RealtimeFrameRequest(BaseModel):
     image_landmarks: Optional[List[List[float]]] = Field(None, description="21 2D normalized landmarks [0, 1]")
     spoken_utterance: Optional[str] = Field(None, description="Live speech transcript from Think-Aloud callout")
     utterance_latency_sec: float = Field(0.0, description="Elapsed latency between step transition and utterance")
+    command: Optional[str] = Field(None, description="Session control command: start, stop, pause, resume, reset, next_step")
 
     @field_validator("student_id", mode="before")
     @classmethod
@@ -107,6 +108,7 @@ class FrameRequest(BaseModel):
     difficulty: str = Field("beginner", description="beginner or intermediate")
     student_id: str = Field("anonymous", description="Student identifier")
     spoken_utterance: Optional[str] = None
+    command: Optional[str] = None
 
     @field_validator("student_id", mode="before")
     @classmethod

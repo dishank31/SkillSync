@@ -166,6 +166,9 @@ async def ws_realtime_training(websocket: WebSocket, session_id: str) -> None:
                 angles, occlusion_reconstructed = apply_anatomical_kinematic_coupling(angles)
 
             # 5. Procedure State Machine
+            if getattr(req, "command", None) in ("reset", "restart", "start"):
+                reset_session(procedure_id=last_procedure_id, session_key=session_id)
+
             state = get_session_state(
                 procedure_id=last_procedure_id,
                 session_key=session_id,
