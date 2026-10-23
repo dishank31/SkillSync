@@ -8,6 +8,7 @@ interface SOPCompilerModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSelectProcedure: (procedureId: string, procedureName?: string) => void;
+  initialPreset?: keyof typeof PRESET_SOPS | string;
 }
 
 const PRESET_SOPS = {
@@ -23,12 +24,22 @@ export default function SOPCompilerModal({
   isOpen,
   onClose,
   onSelectProcedure,
+  initialPreset = "surgical_scalpel",
 }: SOPCompilerModalProps) {
   const [sopText, setSopText] = useState(PRESET_SOPS.surgical_scalpel);
   const [procedureId, setProcedureId] = useState("custom_surgical_sop");
   const [isCompiling, setIsCompiling] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [compileResult, setCompileResult] = useState<SOPCompilerResult | null>(null);
+
+  React.useEffect(() => {
+    if (initialPreset && PRESET_SOPS[initialPreset as keyof typeof PRESET_SOPS]) {
+      setSopText(PRESET_SOPS[initialPreset as keyof typeof PRESET_SOPS]);
+      setProcedureId(`${initialPreset}_custom`);
+      setCompileResult(null);
+      setErrorMsg(null);
+    }
+  }, [initialPreset, isOpen]);
 
   if (!isOpen) return null;
 
@@ -68,120 +79,114 @@ export default function SOPCompilerModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 overflow-y-auto">
-      <div className="relative w-full max-w-4xl bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+    <div className="sop-modal-backdrop" onClick={onClose}>
+      <div className="sop-modal-window" onClick={(e) => e.stopPropagation()}>
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-950/60">
-          <div className="flex items-center gap-3">
-            <span className="flex h-3 w-3 relative">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+        <div className="sop-modal-head">
+          <div className="sop-modal-head-left">
+            <span className="sop-step-badge" style={{ color: "#38bdf8", fontSize: "16px" }}>
+              📜
             </span>
             <div>
-              <h2 className="text-lg font-bold text-white tracking-wide">
+              <h2 className="sop-modal-title">
                 Frame-Semantic SOP-to-Kinematic Compiler
               </h2>
-              <p className="text-xs text-slate-400">
-                CCNLP Pillar 1: Parse English SOP text into 3D joint bounds & NLI hypotheses
+              <p className="sop-modal-subtitle">
+                Academic CCNLP Engine: Parse freeform SOP text into 3D joint bounds & NLI hypotheses
               </p>
             </div>
           </div>
           <button
+            type="button"
             onClick={onClose}
-            className="text-slate-400 hover:text-white transition p-1.5 rounded-lg hover:bg-slate-800"
+            className="sop-modal-close-btn"
+            title="Close Modal"
           >
             ✕
           </button>
         </div>
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-5">
+        <div className="sop-modal-body">
           {/* Preset Buttons */}
-          <div className="flex flex-wrap gap-2 items-center">
-            <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
-              Presets:
-            </span>
+          <div className="sop-presets-row">
+            <span className="sop-presets-label">Instruction Presets:</span>
             <button
+              type="button"
               onClick={() => {
                 setSopText(PRESET_SOPS.surgical_scalpel);
                 setProcedureId("surgical_scalpel_custom");
               }}
-              className="text-xs px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition"
+              className="sop-preset-btn"
             >
               Scalpel Incision (Bard-Parker)
             </button>
             <button
+              type="button"
               onClick={() => {
                 setSopText(PRESET_SOPS.laboratory_pipette);
                 setProcedureId("lab_pipette_custom");
               }}
-              className="text-xs px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition"
+              className="sop-preset-btn"
             >
               Laboratory Micropipetting
             </button>
             <button
+              type="button"
               onClick={() => {
                 setSopText(PRESET_SOPS.electronic_soldering);
                 setProcedureId("soldering_practice_custom");
               }}
-              className="text-xs px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition"
+              className="sop-preset-btn"
             >
               Precision Soldering
             </button>
           </div>
 
           {/* Procedure ID Input */}
-          <div>
-            <label className="block text-xs font-medium text-slate-300 mb-1">
-              Procedure Identifier
-            </label>
+          <div className="sop-input-group">
+            <label className="sop-input-label">Procedure Identifier</label>
             <input
               type="text"
               value={procedureId}
               onChange={(e) => setProcedureId(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 font-mono"
+              className="sop-text-input"
               placeholder="e.g. surgical_scalpel_procedure"
             />
           </div>
 
           {/* SOP Paragraph Input */}
-          <div>
-            <label className="block text-xs font-medium text-slate-300 mb-1">
-              Raw Instructional SOP Paragraph (English)
-            </label>
+          <div className="sop-input-group">
+            <label className="sop-input-label">Raw Instructional SOP Paragraph (English)</label>
             <textarea
-              rows={5}
+              rows={4}
               value={sopText}
               onChange={(e) => setSopText(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-700 rounded-lg p-3 text-sm text-slate-100 focus:outline-none focus:border-indigo-500 leading-relaxed font-mono"
+              className="sop-textarea"
               placeholder="Enter procedural steps e.g. Step 1: Hold scalpel like a pencil at 45 degrees. Hold 3 seconds..."
             />
           </div>
 
           {/* Compile Button */}
-          <div className="flex justify-between items-center">
+          <div className="sop-actions-row">
             <button
+              type="button"
               onClick={handleCompile}
               disabled={isCompiling || !sopText.trim()}
-              className="px-5 py-2.5 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white rounded-xl text-sm font-semibold shadow-lg shadow-indigo-900/30 transition disabled:opacity-50 flex items-center gap-2"
+              className="sop-btn-primary"
             >
               {isCompiling ? (
-                <>
-                  <svg className="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
-                  </svg>
-                  Compiling Semantic Frame Graph...
-                </>
+                <>⏳ Compiling Semantic Frame Graph...</>
               ) : (
-                <>Compile SOP to Kinematic Graph</>
+                <>⚡ Compile SOP to Kinematic Graph</>
               )}
             </button>
 
             {compileResult && (
               <button
+                type="button"
                 onClick={handleActivate}
-                className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-sm font-semibold shadow-lg shadow-emerald-900/30 transition flex items-center gap-2"
+                className="sop-btn-success"
               >
                 ✓ Activate for Live Training
               </button>
@@ -189,78 +194,62 @@ export default function SOPCompilerModal({
           </div>
 
           {errorMsg && (
-            <div className="p-3 bg-rose-950/60 border border-rose-800 text-rose-300 rounded-lg text-xs">
-              {errorMsg}
+            <div className="sop-error-banner">
+              <strong>Error:</strong> {errorMsg}
             </div>
           )}
 
           {/* Compilation Results Visualizer */}
           {compileResult && (
-            <div className="space-y-4 pt-2 border-t border-slate-800">
-              <h3 className="text-sm font-semibold text-indigo-300 flex items-center gap-2">
-                <span>Extracted Frame-Semantic Action Tuples ({compileResult.frame_semantics.length} Steps)</span>
+            <div className="sop-results-section">
+              <h3 className="sop-results-title">
+                Extracted Frame-Semantic Action Tuples ({compileResult.frame_semantics.length} Steps)
               </h3>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="sop-tuples-grid">
                 {compileResult.frame_semantics.map((tuple) => (
-                  <div
-                    key={tuple.step_index}
-                    className="p-3.5 bg-slate-950/70 border border-slate-800 rounded-xl space-y-2"
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold uppercase tracking-wider text-indigo-400">
-                        Step {tuple.step_index}
-                      </span>
-                      <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300">
-                        Dwell: {tuple.hold_duration_sec}s
-                      </span>
+                  <div key={tuple.step_index} className="sop-tuple-card">
+                    <div className="sop-tuple-head">
+                      <span className="sop-step-badge">Step {tuple.step_index}</span>
+                      <span className="sop-dwell-badge">Hold: {tuple.hold_duration_sec}s</span>
                     </div>
 
-                    <p className="text-xs text-slate-200 font-medium italic">
+                    <p className="sop-tuple-raw">
                       "{tuple.raw_text}"
                     </p>
 
-                    <div className="grid grid-cols-2 gap-1.5 text-[11px] pt-1 border-t border-slate-800/80">
+                    <div className="sop-tuple-tags-grid">
                       <div>
-                        <span className="text-slate-400">Predicate:</span>{" "}
-                        <span className="text-emerald-300 font-mono font-semibold">
-                          {tuple.action_predicate}
-                        </span>
+                        <span className="sop-tag-label">Predicate:</span>
+                        <span className="sop-tag-val sop-tag-val--pred">{tuple.action_predicate}</span>
                       </div>
                       <div>
-                        <span className="text-slate-400">Articulator:</span>{" "}
-                        <span className="text-amber-300 font-mono font-semibold">
-                          {tuple.anatomical_articulator}
-                        </span>
+                        <span className="sop-tag-label">Articulator:</span>
+                        <span className="sop-tag-val sop-tag-val--art">{tuple.anatomical_articulator}</span>
                       </div>
-                      <div className="col-span-2">
-                        <span className="text-slate-400">Qualifier:</span>{" "}
-                        <span className="text-sky-300 font-mono">
-                          {tuple.kinematic_qualifier}
-                        </span>
+                      <div style={{ gridColumn: "span 2" }}>
+                        <span className="sop-tag-label">Qualifier:</span>
+                        <span className="sop-tag-val sop-tag-val--qual">{tuple.kinematic_qualifier}</span>
                       </div>
                     </div>
 
                     {/* Verbal hypothesis */}
-                    <div className="bg-slate-900/90 p-2 rounded border border-slate-800 text-[11px]">
-                      <span className="text-slate-400 font-medium block mb-0.5">
+                    <div className="sop-tuple-hypothesis">
+                      <span className="sop-tuple-hypothesis-title">
                         Think-Aloud Verbal Hypothesis:
                       </span>
-                      <span className="text-slate-200 italic font-mono">
+                      <span style={{ fontStyle: "italic", fontFamily: "monospace" }}>
                         "{tuple.verbal_hypothesis}"
                       </span>
                     </div>
 
                     {/* Resolved joint angle bounds */}
                     {Object.keys(tuple.target_angles).length > 0 && (
-                      <div className="text-[11px] space-y-1">
-                        <span className="text-slate-400 block font-medium">Target 3D Joint Bounds:</span>
-                        <div className="flex flex-wrap gap-1.5">
+                      <div>
+                        <span className="sop-tuple-bounds-title">Target 3D Joint Bounds:</span>
+                        <div className="sop-bounds-chips">
                           {Object.entries(tuple.target_angles).map(([joint, b]) => (
-                            <span
-                              key={joint}
-                              className="px-2 py-0.5 bg-slate-900 rounded border border-slate-700 text-indigo-300 font-mono"
-                            >
+                            <span key={joint} className="sop-bound-chip">
                               {joint.replace("_angle", "")}: {b.min}°–{b.max}°
                             </span>
                           ))}

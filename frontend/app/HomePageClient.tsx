@@ -445,6 +445,15 @@ export default function HomePage() {
           </nav>
         </div>
         <div className="top-actions">
+          <button
+            type="button"
+            className="sop-compiler-topbar-btn"
+            onClick={() => setIsSOPModalOpen(true)}
+            title="Open Frame-Semantic SOP-to-Kinematic Compiler"
+          >
+            <span>📜</span>
+            <span>SOP Compiler</span>
+          </button>
           <div className="search-pill">
             {activeTab === "analytics" ? "Search sessions..." : "Search data..."}
           </div>
@@ -623,25 +632,7 @@ export default function HomePage() {
           </section>
 
           <aside className="insights-panel" aria-label="Live metrics">
-            {/* CCNLP Multimodal Telemetry Sidebar */}
-            <CCNLPTelemetrySidebar
-              telemetry={latest}
-              spokenTranscript={speech.transcript}
-              isListening={speech.isListening}
-              onToggleListening={() => {
-                if (speech.isListening) {
-                  speech.stopListening();
-                } else {
-                  speech.startListening();
-                }
-              }}
-              onClearTranscript={speech.clearTranscript}
-              autoSpeak={autoSpeakTTS}
-              onToggleAutoSpeak={() => setAutoSpeakTTS((prev) => !prev)}
-              onOpenSOPCompiler={() => setIsSOPModalOpen(true)}
-            />
-
-            {/* Score Card */}
+            {/* 1. Primary Physical Technique Compliance Score Card */}
             <article className="metric-card">
               <div className="metric-head">
                 <span className="metric-icon">★</span>
@@ -658,6 +649,24 @@ export default function HomePage() {
                 <span style={{ width: `${scorePercent}%` }} />
               </div>
             </article>
+
+            {/* 2. CCNLP Multimodal Telemetry Sidebar */}
+            <CCNLPTelemetrySidebar
+              telemetry={latest}
+              spokenTranscript={speech.transcript}
+              isListening={speech.isListening}
+              onToggleListening={() => {
+                if (speech.isListening) {
+                  speech.stopListening();
+                } else {
+                  speech.startListening();
+                }
+              }}
+              onClearTranscript={speech.clearTranscript}
+              autoSpeak={autoSpeakTTS}
+              onToggleAutoSpeak={() => setAutoSpeakTTS((prev) => !prev)}
+              onOpenSOPCompiler={() => setIsSOPModalOpen(true)}
+            />
 
             {/* Live Measurements with 3-State Badges (Metrics.tsx) */}
             <Metrics
@@ -1042,6 +1051,37 @@ export default function HomePage() {
               <button className="student-btn mt-4">
                 {selectedProcedure === "surgical_knot_tying" ? "Active Task" : "Select Task"}
               </button>
+            </article>
+
+            <article
+              className="analytics-card cursor-pointer p-6 border-2 border-indigo-200 bg-indigo-50/30 transition hover:border-indigo-400"
+              onClick={() => setIsSOPModalOpen(true)}
+              style={{ gridColumn: "span 2" }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                <div>
+                  <span style={{ fontSize: "11px", fontWeight: "800", color: "#4f46e5", textTransform: "uppercase" }}>
+                    Academic CCNLP Engine · Frame-Semantic Model
+                  </span>
+                  <h3 style={{ fontSize: "18px", fontWeight: "700", color: "#1e1b4b", marginTop: "4px" }}>
+                    📜 Zero-Code Instructional SOP Compiler
+                  </h3>
+                  <p style={{ fontSize: "12px", color: "#475569", marginTop: "4px", maxWidth: "600px" }}>
+                    Compile freeform surgical, laboratory, or technical procedural text into real-time 3D joint angle bounds, dwell timers, and Think-Aloud NLI hypotheses automatically.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="sop-compiler-topbar-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsSOPModalOpen(true);
+                  }}
+                  style={{ padding: "8px 16px", fontSize: "12px" }}
+                >
+                  ⚡ Open Compiler
+                </button>
+              </div>
             </article>
           </div>
         </section>

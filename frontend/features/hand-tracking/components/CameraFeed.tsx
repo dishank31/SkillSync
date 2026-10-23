@@ -8,7 +8,7 @@ type CameraFeedProps = {
 };
 
 export default function CameraFeed({ compact = false }: CameraFeedProps) {
-  const { videoRef, streamReady, canSwitchCamera, switchCamera, isSwitchingCamera } = useCamera();
+  const { videoRef, streamReady, canSwitchCamera, switchCamera, isSwitchingCamera, diagnostics } = useCamera();
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   useEffect(() => {
@@ -52,7 +52,13 @@ export default function CameraFeed({ compact = false }: CameraFeedProps) {
             {isFullscreen ? "Exit Full Screen" : "Full Screen"}
           </button>
         </div>
-        {!streamReady && <div className="stage-empty">Allow camera access to start live tracking.</div>}
+        {!streamReady && (
+          <div className="stage-empty">
+            {diagnostics.initError
+              ? `Camera Access: ${diagnostics.initError}`
+              : "Allow camera access in your browser to start live tracking."}
+          </div>
+        )}
       </>
     );
   }
