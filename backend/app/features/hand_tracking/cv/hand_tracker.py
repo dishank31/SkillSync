@@ -37,11 +37,9 @@ class HandTracker:
         HandLandmarkerOptions = mp.tasks.vision.HandLandmarkerOptions
         VisionRunningMode = mp.tasks.vision.RunningMode
 
-        model_path = os.path.join(os.path.dirname(__file__), "hand_landmarker.task")
-        if not os.path.isfile(model_path):
-            raise FileNotFoundError(
-                f"MediaPipe model not found at {model_path}"
-            )
+        from app.features.hand_tracking.cv.detection import ensure_hand_landmarker_model
+
+        model_path = str(ensure_hand_landmarker_model())
 
         options = HandLandmarkerOptions(
             base_options=BaseOptions(model_asset_path=model_path),
@@ -74,7 +72,7 @@ class HandTracker:
             frame: OpenCV BGR image (numpy array).
 
         Returns:
-            A ``TrackingResult`` with landmarks, state, and metadata.
+            A ``TrackingResult`` with 2D image_landmarks, 3D world_landmarks, state, and metadata.
         """
         ts = self._next_timestamp_ms()
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -82,15 +80,21 @@ class HandTracker:
 
         result = self._tracker.detect_for_video(mp_image, ts)
 
-        landmarks: list[list[float]] = []
+        image_landmarks: list[list[float]] = []
+        world_landmarks: list[list[float]] = []
         handedness: str | None = None
         handedness_conf: float | None = None
         detection_conf: float | None = None
 
-        if result.hand_landmarks:
-            hand_lms = result.hand_landmarks[0]
-            for lm in hand_lms:
-                landmarks.append([lm.x, lm.y, lm.z])
+        if result.hand_landmarks and len(result.hand_landmarks) > 0:
+            for lm in result.hand_landmarks[0]:
+                image_landmarks.append([float(lm.x), float(lm.y), float(lm.z)])
+
+            if result.hand_world_landmarks and len(result.hand_world_landmarks) > 0:
+                for wlm in result.hand_world_landmarks[0]:
+                    world_landmarks.append([float(wlm.x), float(wlm.y), float(wlm.z)])
+            else:
+                world_landmarks = [p[:] for p in image_landmarks]
 
             # Extract handedness if available.
             if result.handedness and len(result.handedness) > 0:
@@ -99,7 +103,7 @@ class HandTracker:
                     handedness = top[0].category_name
                     handedness_conf = top[0].score
 
-        has_landmarks = len(landmarks) == 21
+        has_landmarks = len(image_landmarks) == 21
         state = self._state_tracker.update(
             has_landmarks=has_landmarks,
             confidence=handedness_conf,
@@ -107,9 +111,11 @@ class HandTracker:
         )
 
         return TrackingResult(
-            landmarks=landmarks,
+            landmarks=image_landmarks,
             timestamp_ms=ts,
             detection_state=state,
+            world_landmarks=world_landmarks,
+            image_landmarks=image_landmarks,
             handedness=handedness,
             handedness_confidence=handedness_conf,
             detection_confidence=detection_conf,

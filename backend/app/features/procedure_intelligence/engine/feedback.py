@@ -1,26 +1,28 @@
 """
-Generates specific, explainable real-time feedback for procedure coaching.
+Contrastive Diagnostic NLG & Real-Time Feedback Generator (CCNLP NLP Pillar 3).
 
-Rules:
-- Feedback must be specific and only shown for reliable measurements.
-  e.g. "Index PIP angle is 18° above the target range."
-- Show ONE correction at a time (the largest deviation).
-- If measurements are unavailable, guide the learner to keep their hand in view.
+Generates concise, natural-language corrective feedback that explicitly contrasts
+the trainee's verbal Think-Aloud intent (NLI entailment/contradiction) against
+physical 3D joint biomechanics (signed joint angle residuals).
 """
 
 from __future__ import annotations
+
+from typing import Any, Dict, List, Optional
 
 from app.features.procedure_intelligence.engine.rules import ValidationResult
 from app.features.procedure_intelligence.engine.state_machine import StepUpdate
 from app.features.realtime_feedback.schemas.response import FeedbackItem
 
 _METRIC_LABELS: dict[str, str] = {
-    "index_mcp_angle": "Index MCP angle",
-    "mcp_joint": "Index MCP angle",
-    "index_pip_angle": "Index PIP angle",
-    "pip_joint": "Index PIP angle",
-    "index_dip_angle": "Index DIP angle",
-    "wrist_index_angle": "Wrist-index angle",
+    "index_mcp_angle": "Index MCP joint",
+    "mcp_joint": "Index MCP joint",
+    "index_pip_angle": "Index PIP joint",
+    "pip_joint": "Index PIP joint",
+    "index_dip_angle": "Index DIP joint",
+    "middle_pip_angle": "Middle PIP joint",
+    "wrist_index_angle": "Wrist tool-approach angle",
+    "wrist_flexion": "Wrist flexion angle",
     "thumb_index_angle": "Thumb-index spread",
     "index_middle_alignment": "Index-middle alignment",
     "thumb_index_distance": "Thumb-index pinch distance",
@@ -29,6 +31,92 @@ _METRIC_LABELS: dict[str, str] = {
     "index_middle_over_palm": "Index-middle distance",
     "middle_below_index": "Middle finger support position",
 }
+
+
+def generate_contrastive_nlg(
+    *,
+    alignment_state: str,
+    nli_probabilities: Optional[Any] = None,
+    joint_residuals: Optional[Dict[str, float]] = None,
+    current_step_name: str = "current step",
+    step_hypothesis: Optional[str] = None,
+    occlusion_reconstructed: bool = False,
+) -> str:
+    """Generate contrastive data-to-text diagnostic sentence.
+
+    Contrasts verbal intent against physical joint biomechanics:
+    - SYNCHRONIZED_MASTERY: Perfect alignment between verbal callout and joint angles.
+    - MOTOR_EXECUTION_DRIFT: Spoken callout entails step, but joint residuals exceed bounds.
+    - COGNITIVE_PROTOCOL_CONTRADICTION: Pose is compliant, but spoken callout contradicts safety/protocol.
+    - SEMANTIC_HESITATION_OR_OMISSION: Pose held steady, but no verbal callout provided.
+    - DUAL_PATHWAY_FAILURE: Both verbal callout and joint kinematics deviate.
+    """
+    p_entail = getattr(nli_probabilities, "p_entailment", 0.0) if nli_probabilities else 0.0
+    p_contra = getattr(nli_probabilities, "p_contradiction", 0.0) if nli_probabilities else 0.0
+    p_neut = getattr(nli_probabilities, "p_neutral", 1.0) if nli_probabilities else 1.0
+
+    entail_pct = int(round(p_entail * 100))
+    contra_pct = int(round(p_contra * 100))
+    neut_pct = int(round(p_neut * 100))
+
+    # Identify largest joint deviation if any
+    residuals = joint_residuals or {}
+    largest_joint = None
+    largest_residual = 0.0
+    for j, res in residuals.items():
+        if abs(res) > abs(largest_residual):
+            largest_residual = res
+            largest_joint = j
+
+    joint_label = _METRIC_LABELS.get(largest_joint, (largest_joint or "finger").replace("_", " "))
+    res_int = int(round(abs(largest_residual)))
+    sign_str = f"+{res_int}°" if largest_residual > 0 else f"-{res_int}°"
+    deviation_desc = "over-flexed" if largest_residual > 0 else "under-extended"
+    corrective_action = "extend slightly" if largest_residual > 0 else "flex inward slightly"
+
+    occl_note = " [Distal joint reconstructed via anatomical coupling]" if occlusion_reconstructed else ""
+
+    state_str = str(alignment_state).upper()
+
+    if "SYNCHRONIZED_MASTERY" in state_str:
+        return (
+            f"Verbal callout entails {current_step_name} [{entail_pct}%] with precise 3D kinematic compliance. "
+            f"Maintain steady hold.{occl_note}"
+        )
+
+    if "MOTOR_EXECUTION_DRIFT" in state_str:
+        if largest_joint and res_int >= 4:
+            return (
+                f"Verbal callout entails {current_step_name} [{entail_pct}%], but your {joint_label} is "
+                f"{deviation_desc} by {sign_str}; {corrective_action} to lock target grip.{occl_note}"
+            )
+        return (
+            f"Verbal callout entails {current_step_name} [{entail_pct}%], but motor posture drifts from target bounds. "
+            f"Refine finger curvature.{occl_note}"
+        )
+
+    if "COGNITIVE_PROTOCOL_CONTRADICTION" in state_str:
+        return (
+            f"Hand posture is accurate, but your spoken callout contradicts the required SOP protocol "
+            f"({contra_pct}% contradiction). Re-affirm the step action aloud.{occl_note}"
+        )
+
+    if "SEMANTIC_HESITATION_OR_OMISSION" in state_str:
+        return (
+            f"Hand posture is held steadily, but no verbal callout detected ({neut_pct}% neutral). "
+            f"Verbalize your current action aloud to solidify cognitive-motor sync.{occl_note}"
+        )
+
+    # DUAL_PATHWAY_FAILURE
+    if largest_joint and res_int >= 4:
+        return (
+            f"Both physical posture and verbal callout deviate. Adjust {joint_label} ({sign_str}) "
+            f"and verbalize your step action.{occl_note}"
+        )
+    return (
+        f"Kinematic posture and verbal callout out of alignment. Review the step instructions "
+        f"and state your action aloud.{occl_note}"
+    )
 
 
 def _format_violation_feedback(violation: dict) -> FeedbackItem:
@@ -43,7 +131,6 @@ def _format_violation_feedback(violation: dict) -> FeedbackItem:
         dev_str = f"{int(round(abs(dev)))}°"
         msg = f"{label} is {dev_str} {direction} the target range."
     else:
-        # Distance or scalar
         if "thumb_index" in key and direction == "above":
             msg = f"{label} is too wide. Bring your thumb and index finger closer."
         elif "thumb_index" in key and direction == "below":
@@ -65,16 +152,10 @@ def generate_feedback(
     validation: ValidationResult,
     step_update: StepUpdate,
     detection_state: str = "hand_detected",
+    multimodal_result: Optional[Any] = None,
+    occlusion_reconstructed: bool = False,
 ) -> list[FeedbackItem]:
-    """Generate explainable coaching feedback.
-
-    Priorities:
-    1. If tracking is lost or partial, report tracking state.
-    2. If constraints are invalid, show ONE specific correction (the largest deviation).
-    3. If measurements are unavailable, prompt learner to place full hand in view.
-    4. If constraints are valid and dwell hold is active, show remaining hold duration.
-    5. If step completed, congratulate and announce next phase.
-    """
+    """Generate explainable coaching feedback, enriched with Contrastive Diagnostic NLG."""
     if detection_state == "no_hand":
         return [
             FeedbackItem(
@@ -93,9 +174,26 @@ def generate_feedback(
             )
         ]
 
+    # If multimodal scoring result is available, generate contrastive diagnostic sentence
+    if multimodal_result is not None:
+        contrastive_msg = generate_contrastive_nlg(
+            alignment_state=getattr(multimodal_result, "alignment_state", "DUAL_PATHWAY_FAILURE"),
+            nli_probabilities=getattr(multimodal_result, "nli_probabilities", None),
+            joint_residuals=getattr(multimodal_result, "joint_residuals", {}),
+            current_step_name=step_update.step_now,
+            occlusion_reconstructed=occlusion_reconstructed,
+        )
+        severity = "info" if "SYNCHRONIZED_MASTERY" in str(getattr(multimodal_result, "alignment_state", "")) else "warning"
+        return [
+            FeedbackItem(
+                code="CONTRASTIVE_NLG",
+                message=contrastive_msg,
+                severity=severity,
+            )
+        ]
+
     if not validation.valid:
         if validation.violations:
-            # Violations are pre-sorted by deviation_amount in rules.py
             primary = validation.violations[0]
             return [_format_violation_feedback(primary)]
 

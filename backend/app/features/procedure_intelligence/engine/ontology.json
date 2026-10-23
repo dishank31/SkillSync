@@ -1,0 +1,354 @@
+[
+  {
+    "id": "relaxed_open_palm",
+    "name": "Relaxed Open Palm",
+    "description": "Hand flat and open with fingers gently extended and wrist relaxed in neutral posture.",
+    "keywords": ["open palm", "relaxed hand", "flat palm", "open hand", "flat hand", "palm open"],
+    "angles": {
+      "index_mcp_angle": {"min": 155.0, "max": 180.0},
+      "index_pip_angle": {"min": 155.0, "max": 180.0},
+      "middle_pip_angle": {"min": 155.0, "max": 180.0},
+      "ring_pip_angle": {"min": 155.0, "max": 180.0},
+      "pinky_pip_angle": {"min": 155.0, "max": 180.0},
+      "wrist_index_angle": {"min": 150.0, "max": 180.0}
+    },
+    "distances": {
+      "thumb_index_distance": {"min": 0.50, "max": 1.40}
+    }
+  },
+  {
+    "id": "pencil_grip_precision",
+    "name": "Precision Pencil Grip",
+    "description": "Instrument held between the thumb pulp and index finger with middle finger support, resembling writing with a pencil.",
+    "keywords": ["pencil grip", "precision grip", "hold like a pencil", "fine pencil pinch", "three-jaw chuck pencil"],
+    "angles": {
+      "index_pip_angle": {"min": 80.0, "max": 140.0},
+      "index_mcp_angle": {"min": 90.0, "max": 155.0},
+      "thumb_mcp_angle": {"min": 120.0, "max": 170.0},
+      "wrist_index_angle": {"min": 50.0, "max": 135.0}
+    },
+    "distances": {
+      "thumb_index_distance": {"min": 0.0, "max": 0.35},
+      "thumb_middle_distance": {"min": 0.05, "max": 0.45}
+    }
+  },
+  {
+    "id": "dinner_knife_grip",
+    "name": "Dinner Knife (Fiddle-Bow) Grip",
+    "description": "Index finger extended along dorsal shaft for downward cutting pressure; thumb and middle finger grip flanks.",
+    "keywords": ["dinner knife grip", "fiddle bow grip", "knife grip", "scalpel cutting grip", "extended index grip"],
+    "angles": {
+      "index_pip_angle": {"min": 145.0, "max": 180.0},
+      "index_mcp_angle": {"min": 140.0, "max": 180.0},
+      "middle_pip_angle": {"min": 70.0, "max": 130.0},
+      "ring_pip_angle": {"min": 60.0, "max": 120.0},
+      "pinky_pip_angle": {"min": 60.0, "max": 120.0},
+      "wrist_index_angle": {"min": 30.0, "max": 65.0}
+    },
+    "distances": {
+      "thumb_middle_distance": {"min": 0.0, "max": 0.40}
+    }
+  },
+  {
+    "id": "stab_grip",
+    "name": "Stab (Reverse Power) Grip",
+    "description": "Shaft enclosed in clenched fist with blade pointing downward for puncture or heavy penetration.",
+    "keywords": ["stab grip", "reverse grip", "dagger grip", "puncture grip", "ice pick grip"],
+    "angles": {
+      "index_pip_angle": {"min": 50.0, "max": 105.0},
+      "middle_pip_angle": {"min": 50.0, "max": 105.0},
+      "ring_pip_angle": {"min": 50.0, "max": 105.0},
+      "pinky_pip_angle": {"min": 50.0, "max": 105.0},
+      "thumb_mcp_angle": {"min": 80.0, "max": 130.0}
+    },
+    "distances": {
+      "thumb_index_distance": {"min": 0.0, "max": 0.40}
+    }
+  },
+  {
+    "id": "tripod_pinch",
+    "name": "Dynamic Tripod Pinch",
+    "description": "Thumb, index, and middle fingertips converging together at a single apex for stable rotational control.",
+    "keywords": ["tripod pinch", "three point pinch", "tripod grip", "three finger pinch", "tri-finger grasp"],
+    "angles": {
+      "index_pip_angle": {"min": 85.0, "max": 135.0},
+      "middle_pip_angle": {"min": 85.0, "max": 135.0},
+      "index_mcp_angle": {"min": 100.0, "max": 150.0}
+    },
+    "distances": {
+      "thumb_index_distance": {"min": 0.0, "max": 0.35},
+      "thumb_middle_distance": {"min": 0.0, "max": 0.35}
+    }
+  },
+  {
+    "id": "index_pip_moderate_flexion",
+    "name": "Index PIP Moderate Flexion",
+    "description": "Index proximal interphalangeal joint curved in functional mid-flexion between 80 and 120 degrees.",
+    "keywords": ["flex index finger", "moderate index flexion", "curved index", "semi-flexed index", "bend index PIP"],
+    "angles": {
+      "index_pip_angle": {"min": 80.0, "max": 125.0}
+    },
+    "distances": {}
+  },
+  {
+    "id": "wrist_neutral_extension",
+    "name": "Wrist Neutral Extension",
+    "description": "Forearm and metacarpals aligned in ergonomic neutral plane (150 to 180 degrees).",
+    "keywords": ["wrist neutral", "neutral wrist", "straight wrist", "wrist aligned", "unbent wrist"],
+    "angles": {
+      "wrist_flexion": {"min": 150.0, "max": 180.0},
+      "wrist_index_angle": {"min": 150.0, "max": 180.0}
+    },
+    "distances": {}
+  },
+  {
+    "id": "wrist_cutting_angle",
+    "name": "Wrist Cutting Angle (30 to 45 Degrees)",
+    "description": "Hand angled relative to surface at an operative cutting angle of 30 to 50 degrees.",
+    "keywords": ["cutting angle", "30 to 45 degrees", "low cutting angle", "incision angle", "blade incline"],
+    "angles": {
+      "wrist_index_angle": {"min": 30.0, "max": 50.0}
+    },
+    "distances": {}
+  },
+  {
+    "id": "thumb_index_pad_pinch",
+    "name": "Thumb-Index Pad Pinch",
+    "description": "Pulp surfaces of thumb and index distal phalanges meeting for gentle surface manipulation.",
+    "keywords": ["pad pinch", "pulp pinch", "thumb index pad", "palmar pinch", "soft pinch"],
+    "angles": {
+      "index_pip_angle": {"min": 100.0, "max": 150.0},
+      "thumb_ip_angle": {"min": 130.0, "max": 175.0}
+    },
+    "distances": {
+      "thumb_index_distance": {"min": 0.0, "max": 0.28}
+    }
+  },
+  {
+    "id": "thumb_index_tip_pinch",
+    "name": "Thumb-Index Tip Pinch",
+    "description": "Terminal fingertips of thumb and index opposing with flexed distal interphalangeal joints for micro-control.",
+    "keywords": ["tip pinch", "fingertip pinch", "pinpoint pinch", "terminal opposition", "micro pinch"],
+    "angles": {
+      "index_dip_angle": {"min": 60.0, "max": 115.0},
+      "thumb_ip_angle": {"min": 90.0, "max": 140.0}
+    },
+    "distances": {
+      "thumb_index_distance": {"min": 0.0, "max": 0.20}
+    }
+  },
+  {
+    "id": "lateral_key_pinch",
+    "name": "Lateral Key Pinch",
+    "description": "Thumb pulp pressed firmly against the radial lateral border of the index middle phalanx.",
+    "keywords": ["key pinch", "lateral pinch", "key grip", "side pinch", "radial pinch"],
+    "angles": {
+      "index_pip_angle": {"min": 70.0, "max": 115.0},
+      "thumb_mcp_angle": {"min": 130.0, "max": 170.0}
+    },
+    "distances": {
+      "thumb_index_distance": {"min": 0.10, "max": 0.40}
+    }
+  },
+  {
+    "id": "lumbrical_grip",
+    "name": "Lumbrical (Table-Top) Grip",
+    "description": "Metacarpophalangeal joints flexed near 90 degrees while interphalangeal joints stay fully straight.",
+    "keywords": ["lumbrical grip", "table top grip", "lumbrical grasp", "straight finger bend", "intrinsic plus"],
+    "angles": {
+      "index_mcp_angle": {"min": 80.0, "max": 110.0},
+      "index_pip_angle": {"min": 155.0, "max": 180.0},
+      "middle_mcp_angle": {"min": 80.0, "max": 110.0},
+      "middle_pip_angle": {"min": 155.0, "max": 180.0}
+    },
+    "distances": {}
+  },
+  {
+    "id": "power_spherical_grasp",
+    "name": "Power Spherical Grasp",
+    "description": "All digits cupped around a spherical object with thumb abducted in wide opposition.",
+    "keywords": ["spherical grasp", "ball grasp", "spherical grip", "cupped hand", "round grip"],
+    "angles": {
+      "index_mcp_angle": {"min": 100.0, "max": 140.0},
+      "index_pip_angle": {"min": 90.0, "max": 130.0},
+      "middle_pip_angle": {"min": 90.0, "max": 130.0},
+      "ring_pip_angle": {"min": 90.0, "max": 130.0},
+      "pinky_pip_angle": {"min": 90.0, "max": 130.0}
+    },
+    "distances": {
+      "thumb_index_distance": {"min": 0.40, "max": 0.90}
+    }
+  },
+  {
+    "id": "power_cylindrical_grasp",
+    "name": "Power Cylindrical Grasp",
+    "description": "Fingers wrapped securely around a cylindrical handle with thumb overlapping or counter-pressing.",
+    "keywords": ["cylindrical grasp", "power grasp", "handle grip", "can grip", "cylindrical grip"],
+    "angles": {
+      "index_pip_angle": {"min": 65.0, "max": 115.0},
+      "middle_pip_angle": {"min": 65.0, "max": 115.0},
+      "ring_pip_angle": {"min": 65.0, "max": 115.0},
+      "pinky_pip_angle": {"min": 65.0, "max": 115.0},
+      "thumb_mcp_angle": {"min": 100.0, "max": 150.0}
+    },
+    "distances": {
+      "thumb_index_distance": {"min": 0.25, "max": 0.65}
+    }
+  },
+  {
+    "id": "hook_grip",
+    "name": "Hook Grip",
+    "description": "Fingers curled into a hook at PIP and DIP joints while MCP joints remain straight and thumb relaxed.",
+    "keywords": ["hook grip", "finger hook", "hook grasp", "carrying handle grip", "curled fingers"],
+    "angles": {
+      "index_mcp_angle": {"min": 150.0, "max": 180.0},
+      "index_pip_angle": {"min": 70.0, "max": 110.0},
+      "middle_pip_angle": {"min": 70.0, "max": 110.0},
+      "ring_pip_angle": {"min": 70.0, "max": 110.0},
+      "pinky_pip_angle": {"min": 70.0, "max": 110.0}
+    },
+    "distances": {}
+  },
+  {
+    "id": "finger_extension_pointing",
+    "name": "Index Pointing Extension",
+    "description": "Index finger extended straight forward while middle, ring, and pinky are curled into the palm.",
+    "keywords": ["pointing finger", "index pointing", "point finger", "extended index", "aiming finger"],
+    "angles": {
+      "index_mcp_angle": {"min": 160.0, "max": 180.0},
+      "index_pip_angle": {"min": 160.0, "max": 180.0},
+      "middle_pip_angle": {"min": 60.0, "max": 110.0},
+      "ring_pip_angle": {"min": 60.0, "max": 110.0},
+      "pinky_pip_angle": {"min": 60.0, "max": 110.0}
+    },
+    "distances": {}
+  },
+  {
+    "id": "finger_full_fist",
+    "name": "Full Clenched Fist",
+    "description": "All fingers tightly flexed against the palm with the thumb folded across the proximal phalanges.",
+    "keywords": ["clenched fist", "closed fist", "tight fist", "fist", "closed hand"],
+    "angles": {
+      "index_mcp_angle": {"min": 60.0, "max": 100.0},
+      "index_pip_angle": {"min": 50.0, "max": 95.0},
+      "middle_pip_angle": {"min": 50.0, "max": 95.0},
+      "ring_pip_angle": {"min": 50.0, "max": 95.0},
+      "pinky_pip_angle": {"min": 50.0, "max": 95.0}
+    },
+    "distances": {
+      "thumb_index_distance": {"min": 0.05, "max": 0.35}
+    }
+  },
+  {
+    "id": "pipetting_dispense_grip",
+    "name": "Pipetting Dispense Grip",
+    "description": "Shaft held vertically in fingers while thumb articulates on the plunger button above.",
+    "keywords": ["pipette grip", "pipetting grip", "dispensing pipette", "laboratory pipette", "plunger grip"],
+    "angles": {
+      "index_pip_angle": {"min": 70.0, "max": 125.0},
+      "middle_pip_angle": {"min": 70.0, "max": 125.0},
+      "thumb_mcp_angle": {"min": 110.0, "max": 160.0},
+      "thumb_ip_angle": {"min": 70.0, "max": 125.0}
+    },
+    "distances": {
+      "thumb_index_distance": {"min": 0.20, "max": 0.55}
+    }
+  },
+  {
+    "id": "scalpel_incision_approach",
+    "name": "Scalpel Incision Approach",
+    "description": "Scalpel held in pencil posture and oriented near vertical (70 to 110 degrees) prior to tissue contact.",
+    "keywords": ["scalpel approach", "incision approach", "upright scalpel", "vertical scalpel orientation", "entry position"],
+    "angles": {
+      "wrist_index_angle": {"min": 70.0, "max": 115.0},
+      "index_pip_angle": {"min": 85.0, "max": 145.0},
+      "index_mcp_angle": {"min": 95.0, "max": 160.0}
+    },
+    "distances": {
+      "thumb_index_distance": {"min": 0.0, "max": 0.40}
+    }
+  },
+  {
+    "id": "scalpel_deep_cut_hold",
+    "name": "Scalpel Deep Sweep Hold",
+    "description": "Scalpel transitioned to low cutting angle with index finger guiding uniform pressure along tissue plane.",
+    "keywords": ["deep cut hold", "scalpel sweep", "scalpel cut hold", "blade sweep hold", "incision sweep"],
+    "angles": {
+      "wrist_index_angle": {"min": 30.0, "max": 50.0},
+      "index_pip_angle": {"min": 140.0, "max": 180.0},
+      "middle_pip_angle": {"min": 70.0, "max": 125.0}
+    },
+    "distances": {
+      "thumb_middle_distance": {"min": 0.0, "max": 0.40}
+    }
+  },
+  {
+    "id": "soldering_iron_approach",
+    "name": "Soldering Iron Approach",
+    "description": "Soldering iron brought toward work area in controlled pencil grip at 40 to 130 degree approach angle.",
+    "keywords": ["soldering approach", "approach iron", "iron entry", "solder approach phase", "iron approach"],
+    "angles": {
+      "wrist_index_angle": {"min": 40.0, "max": 130.0},
+      "index_mcp_angle": {"min": 65.0, "max": 175.0}
+    },
+    "distances": {
+      "thumb_index_distance": {"min": 0.0, "max": 0.50}
+    }
+  },
+  {
+    "id": "soldering_iron_positioning",
+    "name": "Soldering Iron Positioning",
+    "description": "Tip aligned to target pad with stabilized index PIP joint flexion and resting hand heel.",
+    "keywords": ["soldering positioning", "position iron", "align iron tip", "iron on pad", "positioning phase"],
+    "angles": {
+      "index_pip_angle": {"min": 75.0, "max": 155.0},
+      "wrist_index_angle": {"min": 35.0, "max": 135.0}
+    },
+    "distances": {
+      "thumb_index_distance": {"min": 0.0, "max": 0.50}
+    }
+  },
+  {
+    "id": "soldering_iron_dwell_hold",
+    "name": "Soldering Iron Dwell Hold",
+    "description": "Motionless contact maintained during thermal transfer dwell time.",
+    "keywords": ["soldering dwell", "iron hold", "dwell phase", "thermal transfer hold", "hold iron steady"],
+    "angles": {
+      "wrist_index_angle": {"min": 35.0, "max": 135.0},
+      "index_pip_angle": {"min": 75.0, "max": 155.0},
+      "index_mcp_angle": {"min": 65.0, "max": 175.0}
+    },
+    "distances": {
+      "thumb_index_distance": {"min": 0.0, "max": 0.50}
+    }
+  },
+  {
+    "id": "forceps_micro_tweezing",
+    "name": "Micro Forceps Tweezing",
+    "description": "Fine dissection forceps held in precision tip opposition with delicate finger flexion.",
+    "keywords": ["forceps grip", "tweezing grip", "micro forceps", "pick up forceps", "tweezers pinch"],
+    "angles": {
+      "index_pip_angle": {"min": 110.0, "max": 155.0},
+      "index_dip_angle": {"min": 90.0, "max": 130.0},
+      "thumb_mcp_angle": {"min": 130.0, "max": 170.0}
+    },
+    "distances": {
+      "thumb_index_distance": {"min": 0.05, "max": 0.30}
+    }
+  },
+  {
+    "id": "needle_driver_palming",
+    "name": "Needle Driver Palming",
+    "description": "Surgical needle holder nested in the palm with ring finger through ring and index extending along hinge for steerage.",
+    "keywords": ["palming needle driver", "needle driver grip", "palming technique", "hemostat palming", "suture driver grip"],
+    "angles": {
+      "ring_pip_angle": {"min": 60.0, "max": 110.0},
+      "pinky_pip_angle": {"min": 60.0, "max": 110.0},
+      "index_pip_angle": {"min": 130.0, "max": 175.0},
+      "thumb_mcp_angle": {"min": 100.0, "max": 140.0}
+    },
+    "distances": {
+      "thumb_index_distance": {"min": 0.30, "max": 0.70}
+    }
+  }
+]

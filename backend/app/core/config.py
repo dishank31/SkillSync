@@ -95,3 +95,7 @@ def get_config() -> SkillSyncConfig:
     if _config is None:
         _config = SkillSyncConfig()
     return _config
+
+
+from app.core.settings import Settings, get_settings  # noqa: E402
+

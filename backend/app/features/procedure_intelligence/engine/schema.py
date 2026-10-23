@@ -68,6 +68,10 @@ class StepSchema(BaseModel):
     constraints: StepConstraints = Field(default_factory=StepConstraints)
     dwell_time_ms: int = Field(0, ge=0)
     next_step: str
+    verbal_hypothesis: str | None = Field(
+        None,
+        description="Canonical declarative statement the trainee must entail during Think-Aloud execution.",
+    )
 
 
 class ProcedureSchema(BaseModel):

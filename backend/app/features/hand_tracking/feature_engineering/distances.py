@@ -1,14 +1,11 @@
 """
-Distance metrics from 3D hand landmarks.
+3D Scale-invariant distance and pinch metrics from hand landmarks.
 
-All distances except ``palm_width`` are divided by palm width
-(landmarks 5 → 17) so they are **scale-invariant**: the value is the
-same regardless of how far the hand is from the camera.
-
-Returns ``None`` (not 0) when landmarks are missing or invalid.
-MediaPipe z is a relative model coordinate, NOT calibrated depth in cm.
-See docs/metrics.md for the full metric catalog.
+Normalizes pinch distances by palm scale norm(landmark[0] - landmark[9])
+(wrist to middle-MCP length) so pinch thresholds are camera-distance invariant.
 """
+
+from __future__ import annotations
 
 import math
 from typing import Optional
@@ -24,22 +21,25 @@ def _euclidean_3d(a: list[float], b: list[float]) -> float:
 def compute_distances(
     landmarks: list[list[float]],
 ) -> dict[str, Optional[float]]:
-    """Compute distance metrics from 21 hand landmarks.
+    """Compute scale-invariant distance metrics from 21 3D hand landmarks.
 
-    Metrics returned
-    ----------------
-    thumb_index_distance : Thumb-tip(4) ↔ Index-tip(8), normalised by palm width.
-    index_middle_distance : Index-tip(8) ↔ Middle-tip(12), normalised by palm width.
-    palm_width : Raw index-MCP(5) ↔ pinky-MCP(17) distance (the scale reference).
-    middle_below_index : 1.0 if middle tip y > index tip y (canvas coords), else 0.0.
-
-    Returns ``None`` for every metric when landmarks are missing.
+    Metrics returned:
+        THUMB_INDEX_PINCH: ||p4 - p8|| / ||p0 - p9|| (camera-distance invariant)
+        THUMB_MIDDLE_PINCH: ||p4 - p12|| / ||p0 - p9|| (camera-distance invariant)
+        thumb_index_distance: Thumb-tip(4) <-> Index-tip(8), normalized by palm width.
+        index_middle_distance: Index-tip(8) <-> Middle-tip(12), normalized by palm width.
+        palm_scale: Euclidean distance from wrist(0) to middle-MCP(9).
+        palm_width: Euclidean distance from index-MCP(5) to pinky-MCP(17).
+        middle_below_index: 1.0 if middle tip y > index tip y (canvas coords), else 0.0.
     """
     _none: dict[str, Optional[float]] = {
+        "THUMB_INDEX_PINCH": None,
+        "THUMB_MIDDLE_PINCH": None,
         "thumb_index_distance": None,
         "index_middle_distance": None,
         "thumb_index_over_palm": None,
         "index_middle_over_palm": None,
+        "palm_scale": None,
         "palm_width": None,
         "middle_below_index": None,
     }
@@ -47,31 +47,51 @@ def compute_distances(
     if not landmarks or len(landmarks) < 21:
         return dict(_none)
 
+    wrist = landmarks[0]
     thumb_tip = landmarks[4]
+    index_mcp = landmarks[5]
     index_tip = landmarks[8]
+    middle_mcp = landmarks[9]
     middle_tip = landmarks[12]
+    pinky_mcp = landmarks[17]
 
-    palm_width = _euclidean_3d(landmarks[5], landmarks[17])
+    # Palm length scale (0 -> 9)
+    palm_scale = _euclidean_3d(wrist, middle_mcp)
+    # Palm width scale (5 -> 17)
+    palm_width = _euclidean_3d(index_mcp, pinky_mcp)
 
-    if palm_width <= 1e-6:
-        # Cannot normalise – scale reference is degenerate.
+    scale_ref = palm_scale if palm_scale > 1e-6 else palm_width
+
+    if scale_ref <= 1e-6:
         return {
+            "THUMB_INDEX_PINCH": None,
+            "THUMB_MIDDLE_PINCH": None,
             "thumb_index_distance": None,
             "index_middle_distance": None,
             "thumb_index_over_palm": None,
             "index_middle_over_palm": None,
+            "palm_scale": palm_scale,
             "palm_width": palm_width,
             "middle_below_index": 1.0 if middle_tip[1] > index_tip[1] else 0.0,
         }
 
-    thumb_index_dist = _euclidean_3d(thumb_tip, index_tip) / palm_width
-    index_middle_dist = _euclidean_3d(index_tip, middle_tip) / palm_width
+    # Normalized by palm length scale (norm(0 - 9))
+    thumb_idx_pinch = _euclidean_3d(thumb_tip, index_tip) / scale_ref
+    thumb_mid_pinch = _euclidean_3d(thumb_tip, middle_tip) / scale_ref
+
+    # Normalized by palm width (for existing tests compatibility)
+    width_ref = palm_width if palm_width > 1e-6 else scale_ref
+    thumb_idx_width = _euclidean_3d(thumb_tip, index_tip) / width_ref
+    idx_mid_width = _euclidean_3d(index_tip, middle_tip) / width_ref
 
     return {
-        "thumb_index_distance": thumb_index_dist,
-        "index_middle_distance": index_middle_dist,
-        "thumb_index_over_palm": thumb_index_dist,
-        "index_middle_over_palm": index_middle_dist,
+        "THUMB_INDEX_PINCH": thumb_idx_pinch,
+        "THUMB_MIDDLE_PINCH": thumb_mid_pinch,
+        "thumb_index_distance": thumb_idx_width,
+        "index_middle_distance": idx_mid_width,
+        "thumb_index_over_palm": thumb_idx_width,
+        "index_middle_over_palm": idx_mid_width,
+        "palm_scale": palm_scale,
         "palm_width": palm_width,
         "middle_below_index": 1.0 if middle_tip[1] > index_tip[1] else 0.0,
     }

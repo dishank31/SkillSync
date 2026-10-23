@@ -7,7 +7,7 @@ Provides explicit states so downstream code never has to infer
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 
 
@@ -31,18 +31,24 @@ class DetectionState(str, Enum):
 class TrackingResult:
     """Structured result from hand detection.
 
-    Carries landmarks together with detection metadata that MediaPipe
-    actually provides.  Never invents confidence values.
+    Carries 2D image landmarks, 3D metric world landmarks, and detection
+    metadata directly from MediaPipe.
     """
 
     landmarks: list[list[float]]
-    """21 [x, y, z] landmarks in normalised image coords, or empty list."""
+    """21 [x, y, z] landmarks in normalised image coords (backward compatibility)."""
 
     timestamp_ms: int
     """Monotonic timestamp (ms) when this frame was processed."""
 
     detection_state: DetectionState
     """Current detection state."""
+
+    world_landmarks: list[list[float]] = field(default_factory=list)
+    """21 [x, y, z] metric 3D coordinates in meters from wrist origin."""
+
+    image_landmarks: list[list[float]] = field(default_factory=list)
+    """21 [x, y, z] normalised [0, 1] coordinates strictly for canvas rendering."""
 
     handedness: str | None = None
     """'Left' or 'Right' as reported by MediaPipe, or None."""
@@ -102,3 +108,33 @@ class DetectionStateTracker:
         """Reset to initial state."""
         self._previous_state = DetectionState.NO_HAND
         self._was_lost = False
+
+
+def ensure_hand_landmarker_model(
+    target_path: str | Path | None = None,
+    url: str | None = None,
+) -> Path:
+    """Verify hand_landmarker.task exists or download it automatically.
+
+    Args:
+        target_path: Custom destination path if specified.
+        url: Custom download URL if specified.
+
+    Returns:
+        The validated Path to hand_landmarker.task.
+    """
+    import urllib.request
+    from pathlib import Path
+    from app.core.settings import get_settings
+
+    settings = get_settings()
+    dest = Path(target_path) if target_path else settings.hand_landmarker_path
+
+    if dest.is_file() and dest.stat().st_size > 100_000:
+        return dest
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    download_url = url or settings.hand_landmarker_url
+    urllib.request.urlretrieve(download_url, str(dest))
+    return dest
+

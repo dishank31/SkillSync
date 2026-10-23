@@ -62,8 +62,18 @@ frontend-dev.log
 backend/pip_install_log.txt
 backend/pip.ini
 backend/freeze.txt
-backend/modules.txt
 backend/hand_landmarker.task
+
+## ML / CV / NLP Models & Caches
+*.task
+*.onnx
+*.bin
+*.pt
+*.safetensors
+.cache/
+model_cache/
+huggingface/
+.huggingface/
 
 ## Next.js / Node frontend
 node_modules/

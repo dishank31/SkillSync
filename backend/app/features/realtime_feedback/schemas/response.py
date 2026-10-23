@@ -1,6 +1,6 @@
 from typing import Any, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.features.procedure_intelligence.engine.decay_predictor import DecaySummary
 
@@ -46,3 +46,21 @@ class FrameResponse(BaseModel):
     session_report: Optional[dict[str, Any]] = None
     fatigue: Optional[FatigueInfo] = None
     skill_decay: Optional[DecaySummary] = None
+
+    # CCNLP Multimodal Telemetry Fields
+    alignment_state: Optional[str] = "SYNCHRONIZED_MASTERY"
+    p_entailment: Optional[float] = 0.0
+    p_neutral: Optional[float] = 1.0
+    p_contradiction: Optional[float] = 0.0
+    kinematic_score: Optional[float] = 0.0
+    contrastive_feedback: Optional[str] = None
+    declarative_retention_24h: Optional[float] = 80.0
+    declarative_retention_7d: Optional[float] = 30.0
+    procedural_retention_24h: Optional[float] = 85.0
+    procedural_retention_7d: Optional[float] = 40.0
+    intervention_recommendation: Optional[str] = None
+    joint_residuals: dict[str, float] = Field(default_factory=dict)
+    occlusion_reconstructed: bool = False
+    dwell_remaining_ms: int = 0
+    step_dwell_total_ms: int = 0
+    step_progress_pct: float = 0.0

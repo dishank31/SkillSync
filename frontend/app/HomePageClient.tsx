@@ -5,6 +5,9 @@ import CameraFeed from "../features/hand-tracking/components/CameraFeed";
 import HandOverlay from "../features/hand-tracking/components/HandOverlay";
 import Metrics from "../features/realtime-feedback/components/Metrics";
 import TranslucentHandGuide from "../features/hand-tracking/components/TranslucentHandGuide";
+import SOPCompilerModal from "../features/procedure-intelligence/components/SOPCompilerModal";
+import CCNLPTelemetrySidebar from "../features/realtime-feedback/components/CCNLPTelemetrySidebar";
+import { useThinkAloudSpeech } from "../shared/hooks/useThinkAloudSpeech";
 import { useTelemetry } from "../shared/contexts/TelemetryContext";
 import { API_URL_PREFIX } from "../shared/lib/constants";
 import type {
@@ -117,6 +120,21 @@ export default function HomePage() {
   const [syncProgress, setSyncProgress] = useState(0);
   const [alignmentPercent, setAlignmentPercent] = useState(0);
 
+  // CCNLP Think-Aloud Speech & SOP Compiler State
+  const [isSOPModalOpen, setIsSOPModalOpen] = useState(false);
+  const [autoSpeakTTS, setAutoSpeakTTS] = useState(false);
+  const speech = useThinkAloudSpeech({ autoSpeak: autoSpeakTTS });
+  const [customProcedureTitle, setCustomProcedureTitle] = useState<string | null>(null);
+
+  // Auto-speak contrastive feedback if TTS is enabled and feedback changed
+  const lastSpokenFeedbackRef = useRef<string>("");
+  useEffect(() => {
+    if (autoSpeakTTS && latest?.contrastive_feedback && latest.contrastive_feedback !== lastSpokenFeedbackRef.current) {
+      lastSpokenFeedbackRef.current = latest.contrastive_feedback;
+      speech.speakFeedback(latest.contrastive_feedback);
+    }
+  }, [autoSpeakTTS, latest?.contrastive_feedback, speech]);
+
   const handleSyncUpdate = useCallback((data: { isSynced: boolean; syncProgress: number; alignmentPercent: number }) => {
     setIsSynced(data.isSynced);
     setSyncProgress(data.syncProgress);
@@ -215,6 +233,8 @@ export default function HomePage() {
         procedure_id: selectedProcedure,
         difficulty: difficultyRef.current,
         student_id: studentIdRef.current || "anonymous",
+        spoken_utterance: speech.transcript || undefined,
+        utterance_latency_sec: speech.lastSpokenAt ? (Date.now() - speech.lastSpokenAt) / 1000 : 0,
       });
       frameCounter.current += 1;
     };
@@ -603,6 +623,24 @@ export default function HomePage() {
           </section>
 
           <aside className="insights-panel" aria-label="Live metrics">
+            {/* CCNLP Multimodal Telemetry Sidebar */}
+            <CCNLPTelemetrySidebar
+              telemetry={latest}
+              spokenTranscript={speech.transcript}
+              isListening={speech.isListening}
+              onToggleListening={() => {
+                if (speech.isListening) {
+                  speech.stopListening();
+                } else {
+                  speech.startListening();
+                }
+              }}
+              onClearTranscript={speech.clearTranscript}
+              autoSpeak={autoSpeakTTS}
+              onToggleAutoSpeak={() => setAutoSpeakTTS((prev) => !prev)}
+              onOpenSOPCompiler={() => setIsSOPModalOpen(true)}
+            />
+
             {/* Score Card */}
             <article className="metric-card">
               <div className="metric-head">
@@ -1008,6 +1046,19 @@ export default function HomePage() {
           </div>
         </section>
       )}
+
+      {/* Zero-Code SOP Compiler Modal */}
+      <SOPCompilerModal
+        isOpen={isSOPModalOpen}
+        onClose={() => setIsSOPModalOpen(false)}
+        onSelectProcedure={(pid, name) => {
+          setSelectedProcedure(pid);
+          if (name) setCustomProcedureTitle(name);
+          setIsCalibrated(true);
+          setActiveTab("dashboard");
+        }}
+      />
     </main>
   );
 }
+

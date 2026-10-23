@@ -30,11 +30,21 @@ from app.features.hand_tracking.feature_engineering.distances import compute_dis
 from app.features.hand_tracking.feature_engineering.occlusion import JointOcclusionEstimator
 from app.features.hand_tracking.feature_engineering.smoothing import reset_smoother, smooth_landmarks
 from app.features.hand_tracking.service.camera_runtime import get_camera_runtime
-from app.features.procedure_intelligence.engine.decay_predictor import DecaySummary, predict_decay
-from app.features.procedure_intelligence.engine.feedback import generate_feedback
+from app.features.procedure_intelligence.engine.decay_predictor import (
+    DecaySummary,
+    compute_dual_memory_stability,
+    predict_decay,
+)
+from app.features.procedure_intelligence.engine.feedback import (
+    generate_contrastive_nlg,
+    generate_feedback,
+)
 from app.features.procedure_intelligence.engine.rules import validate_step
 from app.features.procedure_intelligence.engine.schema import load_procedure_schema
-from app.features.procedure_intelligence.engine.scoring import compute_score
+from app.features.procedure_intelligence.engine.scoring import (
+    MultimodalStepScorer,
+    compute_score,
+)
 from app.features.procedure_intelligence.engine.session_aggregator import SessionAggregator
 from app.features.procedure_intelligence.engine.stability import StabilityScorer
 from app.features.procedure_intelligence.engine.state_machine import (
@@ -291,6 +301,46 @@ def process_frame(
             _AGGREGATORS.pop(session_id, None)
             skill_decay = DecaySummary(**predict_decay(request.student_id))
 
+    # 11. Multimodal NLI & Contrastive NLG Enrichment
+    step_hyp = (
+        getattr(step_schema, "verbal_hypothesis", None)
+        or getattr(step_schema, "method", None)
+        or (f"I am executing {step_update.step_now}.")
+    )
+    target_bounds = (
+        {k: (v.min, v.max) for k, v in step_schema.constraints.angles.items()}
+        if step_schema
+        else {}
+    )
+    multimodal_scorer = MultimodalStepScorer.get_instance()
+    multimodal_res = multimodal_scorer.score_step(
+        spoken_utterance=getattr(request, "spoken_utterance", None),
+        step_hypothesis=step_hyp,
+        joint_angles={k: v for k, v in angles.items() if v is not None},
+        target_bounds=target_bounds,
+        stability_score=stability if is_observed else 0.5,
+    )
+    contrastive_msg = generate_contrastive_nlg(
+        alignment_state=multimodal_res.alignment_state.value,
+        nli_probabilities=multimodal_res.nli_probabilities,
+        joint_residuals=multimodal_res.joint_residuals,
+        current_step_name=step_schema.name if step_schema else step_update.step_now,
+        step_hypothesis=step_hyp,
+    )
+    dual_decay = compute_dual_memory_stability(
+        sessions=[],
+        nli_entailment_rate=multimodal_res.nli_probabilities.p_entailment,
+        nli_contradiction_rate=multimodal_res.nli_probabilities.p_contradiction,
+    )
+
+    dwell_target = step_schema.dwell_time_ms if step_schema else 2000
+    dwell_rem = max(0, int(step_update.dwell_remaining_ms))
+    step_progress = (
+        max(0.0, min(100.0, (1.0 - (dwell_rem / max(1, dwell_target))) * 100.0))
+        if dwell_target > 0
+        else 100.0
+    )
+
     return FrameResponse(
         step=step_update.step_now,
         valid=validation.valid and is_observed,
@@ -313,4 +363,20 @@ def process_frame(
         session_report=session_report,
         fatigue=None,
         skill_decay=skill_decay,
+        alignment_state=multimodal_res.alignment_state.value,
+        p_entailment=multimodal_res.nli_probabilities.p_entailment,
+        p_neutral=multimodal_res.nli_probabilities.p_neutral,
+        p_contradiction=multimodal_res.nli_probabilities.p_contradiction,
+        kinematic_score=multimodal_res.kinematic_score,
+        contrastive_feedback=contrastive_msg,
+        declarative_retention_24h=dual_decay.declarative_cognitive_retention_24h,
+        declarative_retention_7d=dual_decay.declarative_cognitive_retention_7d,
+        procedural_retention_24h=dual_decay.procedural_motor_retention_24h,
+        procedural_retention_7d=dual_decay.procedural_motor_retention_7d,
+        intervention_recommendation=dual_decay.intervention_recommendation,
+        joint_residuals=multimodal_res.joint_residuals,
+        dwell_remaining_ms=dwell_rem,
+        step_dwell_total_ms=dwell_target,
+        step_progress_pct=round(step_progress, 1),
     )
+

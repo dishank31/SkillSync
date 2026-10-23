@@ -1,17 +1,23 @@
-"""REST API for student management, session history, and decay predictions."""
+"""REST API for student management, session history, procedure compilation, and decay predictions."""
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.core.database import get_db
 from app.features.procedure_intelligence.engine.decay_predictor import DecaySummary, predict_decay
+from app.features.procedure_intelligence.engine.schema import PROCEDURES
+from app.features.procedure_intelligence.engine.sop_compiler import (
+    SOPCompiler,
+    SOPCompilerResult,
+)
 
 
-router = APIRouter(prefix="/api", tags=["students"])
+router = APIRouter(prefix="/api", tags=["students", "procedures"])
 
 
 def _normalize_completed_at(value: str | None) -> str | None:
@@ -49,6 +55,11 @@ class SessionResponse(BaseModel):
     avg_hesitation_ms: float
     tremor_score: float
     passed: bool
+
+
+class CompileSOPRequest(BaseModel):
+    sop_text: str = Field(..., min_length=5, description="Raw instructional SOP paragraph")
+    procedure_id: str = Field("custom_compiled_sop", description="Unique procedure identifier")
 
 
 # ── Endpoints ───────────────────────────────────────────────────────────
@@ -90,3 +101,13 @@ def get_sessions(student_id: str) -> list[dict]:
 @router.get("/students/{student_id}/decay", response_model=DecaySummary)
 def get_decay_prediction(student_id: str) -> DecaySummary:
     return DecaySummary(**predict_decay(student_id.strip().lower()))
+
+
+@router.post("/procedures/compile-sop", response_model=SOPCompilerResult)
+def compile_sop(body: CompileSOPRequest) -> SOPCompilerResult:
+    """Compile unstructured English SOP paragraph into an executable 3D kinematic state machine."""
+    compiler = SOPCompiler.get_instance()
+    result = compiler.compile(body.sop_text, body.procedure_id)
+    # Register compiled procedure into memory for immediate training sessions
+    PROCEDURES[result.procedure_schema.procedure_id] = result.procedure_schema.model_dump()
+    return result

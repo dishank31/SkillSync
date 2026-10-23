@@ -176,3 +176,20 @@ def validate_step(
         distances=distances,
         scalars=scalars,
     )
+
+
+def evaluate_step_constraints(
+    step: Optional[StepSchema],
+    angles: dict[str, Optional[float]],
+    distances: dict[str, Optional[float]],
+    scalars: dict[str, Optional[float]] | None = None,
+) -> ValidationResult:
+    if step is None or step.constraints is None:
+        return ValidationResult(valid=True, violations=[], unavailable=[])
+    return evaluate_constraints(
+        constraints=step.constraints,
+        angles=angles,
+        distances=distances,
+        scalars=scalars,
+    )
+
