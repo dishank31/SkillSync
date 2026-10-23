@@ -178,11 +178,27 @@ export default function CCNLPTelemetrySidebar({
               type="button"
               onClick={onToggleListening}
               className={`ccnlp-mic-btn ${isListening ? "ccnlp-mic-btn--active" : ""}`}
-              title={isListening ? "Mute Microphone" : "Enable Hands-Free Think-Aloud Speech"}
+              title={isListening ? "Pause Microphone" : "Enable Hands-Free Think-Aloud Speech"}
             >
               🎤
             </button>
-            <span className="ccnlp-speech-title">Think-Aloud Callout</span>
+            <div>
+              <span className="ccnlp-speech-title">Think-Aloud Callout</span>
+              {isListening && (
+                <span
+                  style={{
+                    marginLeft: "6px",
+                    fontSize: "9px",
+                    fontWeight: 800,
+                    color: "#dc2626",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.04em",
+                  }}
+                >
+                  ● Live Mic
+                </span>
+              )}
+            </div>
           </div>
 
           <div className="ccnlp-speech-controls">
@@ -199,6 +215,7 @@ export default function CCNLPTelemetrySidebar({
                 type="button"
                 onClick={onClearTranscript}
                 className="ccnlp-clear-btn"
+                title="Clear current spoken callout"
               >
                 Clear
               </button>
@@ -206,17 +223,140 @@ export default function CCNLPTelemetrySidebar({
           </div>
         </div>
 
-        <div className="ccnlp-transcript-box">
+        {/* Speech Error Banner if permission or hardware blocked */}
+        {speechError && (
+          <div className="ccnlp-speech-error-box">
+            <span>⚠️ {speechError}</span>
+            <button
+              type="button"
+              onClick={onToggleListening}
+              style={{
+                marginLeft: "8px",
+                background: "#fee2e2",
+                border: "1px solid #f87171",
+                borderRadius: "4px",
+                padding: "2px 6px",
+                fontSize: "9px",
+                fontWeight: 700,
+                cursor: "pointer",
+                color: "#991b1b",
+              }}
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
+        <div
+          className="ccnlp-transcript-box"
+          onClick={() => {
+            if (!isListening) onToggleListening();
+          }}
+          style={{ cursor: !isListening ? "pointer" : "default" }}
+          title={!isListening ? "Click to enable microphone" : "Live spoken transcript"}
+        >
           {spokenTranscript ? (
-            <span>"{spokenTranscript}"</span>
+            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <span style={{ color: "#059669", fontWeight: 700 }}>🎙️</span>
+              <span style={{ fontWeight: 600 }}>"{spokenTranscript}"</span>
+            </div>
           ) : (
             <span className="ccnlp-transcript-placeholder">
               {isListening
-                ? "Listening... e.g. 'I am holding the scalpel in pencil grip at 45 degrees'"
+                ? "🎙️ Listening... Speak your action (e.g. 'Holding scalpel in pencil grip at 45 degrees')"
                 : "Microphone paused. Click 🎤 to enable Think-Aloud."}
             </span>
           )}
         </div>
+
+        {/* Quick Callout suggestions and manual type option */}
+        <div className="ccnlp-quick-callouts">
+          <span className="ccnlp-quick-callouts-label">Quick Callouts:</span>
+          <button
+            type="button"
+            className="ccnlp-callout-pill"
+            onClick={() => onSetTranscript?.("Holding scalpel in pencil grip firmly")}
+            title="Inject: Holding scalpel in pencil grip firmly"
+          >
+            Pencil Grip
+          </button>
+          <button
+            type="button"
+            className="ccnlp-callout-pill"
+            onClick={() => onSetTranscript?.("Maintaining steady approach at 45 degrees")}
+            title="Inject: Maintaining steady approach at 45 degrees"
+          >
+            45° Hold
+          </button>
+          <button
+            type="button"
+            className="ccnlp-callout-pill"
+            onClick={() => onSetTranscript?.("Index finger extended along top spine")}
+            title="Inject: Index finger extended along top spine"
+          >
+            Spine Support
+          </button>
+          <button
+            type="button"
+            className="ccnlp-type-toggle-btn"
+            onClick={() => setIsEditingCallout((prev) => !prev)}
+          >
+            {isEditingCallout ? "Close" : "✏️ Type Callout"}
+          </button>
+        </div>
+
+        {/* Inline Manual Callout Input */}
+        {isEditingCallout && (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (typedInput.trim()) {
+                onSetTranscript?.(typedInput.trim());
+                setTypedInput("");
+                setIsEditingCallout(false);
+              }
+            }}
+            style={{
+              display: "flex",
+              gap: "6px",
+              marginTop: "6px",
+              paddingTop: "6px",
+              borderTop: "1px dashed #e2e8f0",
+            }}
+          >
+            <input
+              type="text"
+              value={typedInput}
+              onChange={(e) => setTypedInput(e.target.value)}
+              placeholder="Type think-aloud callout..."
+              style={{
+                flex: 1,
+                fontSize: "11px",
+                padding: "4px 8px",
+                borderRadius: "6px",
+                border: "1px solid #cbd5e1",
+                background: "#ffffff",
+                color: "#0f172a",
+              }}
+              autoFocus
+            />
+            <button
+              type="submit"
+              style={{
+                fontSize: "10px",
+                fontWeight: 700,
+                padding: "4px 10px",
+                background: "#0284c7",
+                color: "#ffffff",
+                border: "none",
+                borderRadius: "6px",
+                cursor: "pointer",
+              }}
+            >
+              Send
+            </button>
+          </form>
+        )}
       </div>
 
       {/* 5. Contrastive Diagnostic NLG Banner */}

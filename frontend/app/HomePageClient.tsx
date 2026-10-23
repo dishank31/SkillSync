@@ -233,8 +233,10 @@ export default function HomePage() {
         procedure_id: selectedProcedure,
         difficulty: difficultyRef.current,
         student_id: studentIdRef.current || "anonymous",
-        spoken_utterance: speech.transcript || undefined,
-        utterance_latency_sec: speech.lastSpokenAt ? (Date.now() - speech.lastSpokenAt) / 1000 : 0,
+        spoken_utterance: (speech.transcriptRef?.current ?? speech.transcript) || undefined,
+        utterance_latency_sec: (speech.lastSpokenAtRef?.current ?? speech.lastSpokenAt)
+          ? (Date.now() - (speech.lastSpokenAtRef?.current ?? speech.lastSpokenAt!)) / 1000
+          : 0,
       });
       frameCounter.current += 1;
     };
@@ -655,6 +657,7 @@ export default function HomePage() {
               telemetry={latest}
               spokenTranscript={speech.transcript}
               isListening={speech.isListening}
+              speechError={speech.speechError}
               onToggleListening={() => {
                 if (speech.isListening) {
                   speech.stopListening();
@@ -663,6 +666,7 @@ export default function HomePage() {
                 }
               }}
               onClearTranscript={speech.clearTranscript}
+              onSetTranscript={speech.setTranscript}
               autoSpeak={autoSpeakTTS}
               onToggleAutoSpeak={() => setAutoSpeakTTS((prev) => !prev)}
               onOpenSOPCompiler={() => setIsSOPModalOpen(true)}
@@ -1007,79 +1011,143 @@ export default function HomePage() {
 
           <div className="grid grid-cols-2 gap-4">
             <article
-              className={`analytics-card cursor-pointer p-6 border-2 transition ${
+              className={`analytics-card p-6 border-2 transition ${
                 selectedProcedure === "soldering_practice"
                   ? "border-cyan-600 bg-cyan-50/20"
                   : "border-slate-200"
               }`}
-              onClick={() => {
-                setSelectedProcedure("soldering_practice");
-                setIsCalibrated(false);
-                setStableFrameCount(0);
-                setActiveTab("dashboard");
-              }}
             >
-              <span className="text-xs font-bold text-cyan-600 uppercase">Primary Task</span>
-              <h3 className="text-lg font-bold text-slate-800 mt-1">Simulated Soldering Practice</h3>
-              <p className="text-xs text-slate-500 mt-1">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-cyan-600 uppercase tracking-wider">Primary Task</span>
+                {selectedProcedure === "soldering_practice" && (
+                  <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
+                    Active Task
+                  </span>
+                )}
+              </div>
+              <h3 className="text-lg font-bold text-slate-800 mt-2">Simulated Soldering Practice</h3>
+              <p className="text-xs text-slate-500 mt-1 leading-relaxed">
                 Approach, positioning, and 3-second thermal dwell hold on a fixed work area.
                 Coaches visual pencil grip angle and steadiness.
               </p>
-              <button className="student-btn mt-4">
-                {selectedProcedure === "soldering_practice" ? "Active Task" : "Select Task"}
-              </button>
-            </article>
 
-            <article
-              className={`analytics-card cursor-pointer p-6 border-2 transition ${
-                selectedProcedure === "surgical_knot_tying"
-                  ? "border-cyan-600 bg-cyan-50/20"
-                  : "border-slate-200"
-              }`}
-              onClick={() => {
-                setSelectedProcedure("surgical_knot_tying");
-                setIsCalibrated(false);
-                setStableFrameCount(0);
-                setActiveTab("dashboard");
-              }}
-            >
-              <span className="text-xs font-bold text-slate-500 uppercase">Secondary Task</span>
-              <h3 className="text-lg font-bold text-slate-800 mt-1">Scalpel Handling</h3>
-              <p className="text-xs text-slate-500 mt-1">
-                Precision grip, finger support, initial incision positioning, and cutting angle control.
-              </p>
-              <button className="student-btn mt-4">
-                {selectedProcedure === "surgical_knot_tying" ? "Active Task" : "Select Task"}
-              </button>
-            </article>
+              <div className="flex flex-wrap gap-1.5 mt-3">
+                <span className="text-[10px] font-semibold text-cyan-800 bg-cyan-100/70 px-2 py-0.5 rounded">
+                  3D Joint Bounds
+                </span>
+                <span className="text-[10px] font-semibold text-indigo-800 bg-indigo-100/70 px-2 py-0.5 rounded">
+                  DeBERTa-v3 NLI
+                </span>
+                <span className="text-[10px] font-semibold text-emerald-800 bg-emerald-100/70 px-2 py-0.5 rounded">
+                  Frame-Semantic SOP
+                </span>
+              </div>
 
-            <article
-              className="analytics-card cursor-pointer p-6 border-2 border-indigo-200 bg-indigo-50/30 transition hover:border-indigo-400"
-              onClick={() => setIsSOPModalOpen(true)}
-              style={{ gridColumn: "span 2" }}
-            >
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                <div>
-                  <span style={{ fontSize: "11px", fontWeight: "800", color: "#4f46e5", textTransform: "uppercase" }}>
-                    Academic CCNLP Engine · Frame-Semantic Model
-                  </span>
-                  <h3 style={{ fontSize: "18px", fontWeight: "700", color: "#1e1b4b", marginTop: "4px" }}>
-                    📜 Zero-Code Instructional SOP Compiler
-                  </h3>
-                  <p style={{ fontSize: "12px", color: "#475569", marginTop: "4px", maxWidth: "600px" }}>
-                    Compile freeform surgical, laboratory, or technical procedural text into real-time 3D joint angle bounds, dwell timers, and Think-Aloud NLI hypotheses automatically.
-                  </p>
-                </div>
+              <div className="flex items-center gap-3 mt-5">
                 <button
                   type="button"
-                  className="sop-compiler-topbar-btn"
+                  className="student-btn flex-1"
+                  onClick={() => {
+                    setSelectedProcedure("soldering_practice");
+                    setIsCalibrated(false);
+                    setStableFrameCount(0);
+                    setActiveTab("dashboard");
+                  }}
+                >
+                  {selectedProcedure === "soldering_practice" ? "Practice Now" : "Select Task"}
+                </button>
+                <button
+                  type="button"
+                  className="sop-compiler-inline-btn"
                   onClick={(e) => {
                     e.stopPropagation();
                     setIsSOPModalOpen(true);
                   }}
-                  style={{ padding: "8px 16px", fontSize: "12px" }}
+                  title="Open Frame-Semantic SOP Compiler for this procedure"
+                  style={{
+                    padding: "9px 14px",
+                    fontSize: "12px",
+                    fontWeight: 700,
+                    borderRadius: "8px",
+                    background: "#eff6ff",
+                    border: "1px solid #bfdbfe",
+                    color: "#1d4ed8",
+                    cursor: "pointer",
+                    transition: "all 0.15s ease",
+                  }}
                 >
-                  ⚡ Open Compiler
+                  ⚡ Custom SOP
+                </button>
+              </div>
+            </article>
+
+            <article
+              className={`analytics-card p-6 border-2 transition ${
+                selectedProcedure === "surgical_knot_tying"
+                  ? "border-cyan-600 bg-cyan-50/20"
+                  : "border-slate-200"
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Secondary Task</span>
+                {selectedProcedure === "surgical_knot_tying" && (
+                  <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
+                    Active Task
+                  </span>
+                )}
+              </div>
+              <h3 className="text-lg font-bold text-slate-800 mt-2">Scalpel Handling</h3>
+              <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                Precision grip, finger support, initial incision positioning, and cutting angle control
+                with Dr. Choudhary technique bounds.
+              </p>
+
+              <div className="flex flex-wrap gap-1.5 mt-3">
+                <span className="text-[10px] font-semibold text-cyan-800 bg-cyan-100/70 px-2 py-0.5 rounded">
+                  3D Joint Bounds
+                </span>
+                <span className="text-[10px] font-semibold text-indigo-800 bg-indigo-100/70 px-2 py-0.5 rounded">
+                  DeBERTa-v3 NLI
+                </span>
+                <span className="text-[10px] font-semibold text-emerald-800 bg-emerald-100/70 px-2 py-0.5 rounded">
+                  Frame-Semantic SOP
+                </span>
+              </div>
+
+              <div className="flex items-center gap-3 mt-5">
+                <button
+                  type="button"
+                  className="student-btn flex-1"
+                  onClick={() => {
+                    setSelectedProcedure("surgical_knot_tying");
+                    setIsCalibrated(false);
+                    setStableFrameCount(0);
+                    setActiveTab("dashboard");
+                  }}
+                >
+                  {selectedProcedure === "surgical_knot_tying" ? "Practice Now" : "Select Task"}
+                </button>
+                <button
+                  type="button"
+                  className="sop-compiler-inline-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsSOPModalOpen(true);
+                  }}
+                  title="Open Frame-Semantic SOP Compiler for this procedure"
+                  style={{
+                    padding: "9px 14px",
+                    fontSize: "12px",
+                    fontWeight: 700,
+                    borderRadius: "8px",
+                    background: "#eff6ff",
+                    border: "1px solid #bfdbfe",
+                    color: "#1d4ed8",
+                    cursor: "pointer",
+                    transition: "all 0.15s ease",
+                  }}
+                >
+                  ⚡ Custom SOP
                 </button>
               </div>
             </article>
